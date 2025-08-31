@@ -1,0 +1,383 @@
+<!doctype html>
+
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Kamera → Schach-Analyse</title>
+  <style>
+    :root { --bg:#0b1020; --panel:#0f172a; --muted:#94a3b8; --text:#e5e7eb; --accent:#60a5fa; --danger:#f87171; --ok:#34d399; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; background: radial-gradient(1000px 600px at 10% -10%, #172036 0%, #0b1020 40%, #060914 100%); color: var(--text); }
+    header { padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .brand { font-weight: 800; letter-spacing: .2px; }
+    main { display: grid; gap: 14px; padding: 14px; max-width: 1100px; margin: 0 auto 40px; }.card { background: #0b1120; border: 1px solid #1f2937; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.35); overflow: hidden; }
+.card > .hd { padding: 10px 12px; border-bottom: 1px solid #1f2937; font-weight: 700; background: linear-gradient(180deg,#0d1428,#0b1120); }
+.card > .bd { padding: 12px; }
+
+.video-wrap { position: relative; background: #000; }
+video { width: 100%; height: 100%; display: block; object-fit: cover; aspect-ratio: 9/16; background: #000; }
+
+.controls { display: grid; gap: 10px; grid-template-columns: 1fr 1fr 1fr 1fr; }
+@media(max-width: 760px){ .controls { grid-template-columns: 1fr 1fr; } }
+
+select, button, input[type="file"], input[type="text"] { width: 100%; padding: 12px 14px; border-radius: 12px; border: 1px solid #263044; background: #0b1222; color: var(--text); }
+button { cursor: pointer; border: 1px solid #1e2a41; transition: transform .05s ease, background .2s ease, box-shadow .2s ease; }
+button:hover { box-shadow: 0 0 0 3px rgba(96,165,250,.25); }
+button:active { transform: translateY(1px); }
+.primary { background: linear-gradient(180deg, #2563eb, #1d4ed8); border-color: #1d4ed8; }
+.danger { background: linear-gradient(180deg, #ef4444, #dc2626); border-color: #dc2626; }
+.ghost { background: #0b1222; }
+.ok { background: linear-gradient(180deg,#10b981,#059669); border-color:#059669; }
+
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media(min-width: 920px){ .grid { grid-template-columns: 1.1fr .9fr; } }
+
+.notice { color: var(--muted); font-size: 14px; line-height: 1.5; }
+.error { color: var(--danger); }
+
+.canvasWrap { position: relative; background:#000; border-radius: 16px; overflow: hidden; border:1px solid #1f2937; }
+canvas { display:block; width:100%; height:auto; }
+.handle { position:absolute; width:22px; height:22px; border-radius: 999px; background:#fff; border: 3px solid #2563eb; box-shadow:0 8px 20px rgba(0,0,0,.4); touch-action:none; }
+
+.boardGrid { display:grid; grid-template-columns: repeat(8,1fr); gap:2px; background:#0b1220; padding:2px; border-radius:12px; border:1px solid #1f2937; }
+.sq { position:relative; aspect-ratio: 1/1; border-radius: 8px; background:#101826; display:flex; align-items:center; justify-content:center; font-weight:700; }
+.sq[data-dark="1"]{ background:#0e1622; }
+.sq img { width: 86%; height:86%; object-fit: contain; }
+
+.palette { display:grid; grid-template-columns: repeat(12,1fr); gap:6px; }
+.chip { font-size: 12px; padding: 8px 10px; border-radius: 999px; background: #0b1222; color: var(--text); border: 1px solid #283347; text-decoration: none; text-align:center; }
+.chip[aria-pressed="true"]{ box-shadow: 0 0 0 3px rgba(96,165,250,.35); }
+.row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.row > * { flex: 1 1 auto; }
+
+.pill { display:inline-flex; align-items:center; gap:8px; padding: 6px 10px; border-radius: 999px; border:1px solid #21304a; background:#0b1222; }
+.pill input { margin:0; }
+
+.shots { display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap:10px; }
+.shot { border:1px solid #1f2937; border-radius:12px; overflow:hidden; background:#050a16; }
+.shot img { display:block; width:100%; height:100%; object-fit:cover; }
+
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand">♟️ Kamera → Brett → FEN → Lichess</div>
+  <div class="notice">Läuft komplett im Browser. Für Kamerazugriff bitte über <strong>HTTPS</strong> öffnen.</div>
+</header><main>
+  <section class="card">
+    <div class="hd">1) Foto aufnehmen</div>
+    <div class="bd">
+      <div class="controls" style="margin-bottom:10px;">
+        <select id="cameraSelect" aria-label="Kamera auswählen"></select>
+        <button id="btnStart" class="primary">Kamera Start</button>
+        <button id="btnFlip" class="ghost">Kamera wechseln</button>
+        <button id="btnStop" class="danger">Stop</button>
+      </div>
+      <div class="row" style="margin-bottom:10px;">
+        <button id="btnShoot" class="primary">📸 Brett fotografieren</button>
+        <label class="ghost" style="display:inline-flex; align-items:center; justify-content:center; gap:8px;">
+          <input id="fileFallback" type="file" accept="image/*" capture="environment" style="display:none;" />
+          <span>oder Bild-Datei wählen</span>
+        </label>
+      </div>
+      <div class="video-wrap"><video id="video" playsinline autoplay muted></video></div>
+      <p id="status" class="notice" role="status"></p>
+    </div>
+  </section>  <section class="grid">
+    <div class="card">
+      <div class="hd">2) Brett ausrichten (Ecken ziehen → Entzerren)</div>
+      <div class="bd">
+        <div class="canvasWrap">
+          <canvas id="photoCanvas"></canvas>
+          <!-- drag handles for corners: TL, TR, BR, BL -->
+          <div class="handle" id="h0" style="left:20px; top:20px;"></div>
+          <div class="handle" id="h1" style="right:20px; top:20px;"></div>
+          <div class="handle" id="h2" style="right:20px; bottom:20px;"></div>
+          <div class="handle" id="h3" style="left:20px; bottom:20px;"></div>
+        </div>
+        <div class="row" style="margin-top:10px;">
+          <button id="btnWarp" class="ok">Brett entzerren</button>
+          <button id="btnAutoCorners" class="ghost">Ecken auto finden (Beta)</button>
+        </div>
+      </div>
+    </div><div class="card">
+  <div class="hd">3) Felder prüfen & korrigieren</div>
+  <div class="bd">
+    <div id="boardGrid" class="boardGrid" aria-live="polite"></div>
+    <p class="notice" style="margin-top:8px;">Tipp: Tippe auf ein Feld, um die Figur zu ändern. Lange tippen: leeren.</p>
+    <div class="palette" id="palette" style="margin-top:8px;"></div>
+    <div class="row" style="margin-top:10px;">
+      <label class="pill"><input type="checkbox" id="wck" checked /> Weiß: 0-0</label>
+      <label class="pill"><input type="checkbox" id="wcq" checked /> Weiß: 0-0-0</label>
+      <label class="pill"><input type="checkbox" id="bck" checked /> Schwarz: 0-0</label>
+      <label class="pill"><input type="checkbox" id="bcq" checked /> Schwarz: 0-0-0</label>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <label class="pill"><input type="radio" name="turn" value="w" checked /> Weiß am Zug</label>
+      <label class="pill"><input type="radio" name="turn" value="b" /> Schwarz am Zug</label>
+      <input id="ep" type="text" placeholder="En-passant Feld (z.B. e6 oder -)" />
+      <input id="halfmove" type="text" placeholder="Halbzüge seit letztem Schlag/Zug (z.B. 0)" />
+      <input id="fullmove" type="text" placeholder="Zugnummer (z.B. 1)" />
+    </div>
+  </div>
+</div>
+
+  </section>  <section class="card">
+    <div class="hd">4) FEN erzeugen & analysieren</div>
+    <div class="bd">
+      <div class="row">
+        <button id="btnSuggest" class="ghost">Auto-Erkennung (Beta)</button>
+        <button id="btnClear" class="ghost">Brett leeren</button>
+        <button id="btnStartpos" class="ghost">Startstellung</button>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="btnToLichess" class="primary">Auf Lichess analysieren</button>
+        <button id="btnCopyFen" class="ok">FEN kopieren</button>
+      </div>
+      <p class="notice" id="fenOut" style="margin-top:8px; word-break: break-all;"></p>
+      <div class="shots" id="shots" style="margin-top:10px;"></div>
+    </div>
+  </section>
+</main><!-- OpenCV.js für Geometrie/Entzerrung (Client-seitig) --><script async src="https://docs.opencv.org/4.x/opencv.js"></script><script>
+(function(){
+  // ======= Kamera-Teil (wie zuvor) =======
+  const video = document.getElementById('video');
+  const cameraSelect = document.getElementById('cameraSelect');
+  const btnStart = document.getElementById('btnStart');
+  const btnStop = document.getElementById('btnStop');
+  const btnFlip = document.getElementById('btnFlip');
+  const btnShoot = document.getElementById('btnShoot');
+  const fileFallback = document.getElementById('fileFallback');
+  const shots = document.getElementById('shots');
+  const statusEl = document.getElementById('status');
+
+  const photoCanvas = document.getElementById('photoCanvas');
+  const ctxPhoto = photoCanvas.getContext('2d');
+
+  const handles = [0,1,2,3].map(i => document.getElementById('h'+i));
+  const btnWarp = document.getElementById('btnWarp');
+  const btnAutoCorners = document.getElementById('btnAutoCorners');
+
+  const boardGrid = document.getElementById('boardGrid');
+  const palette = document.getElementById('palette');
+  const fenOut = document.getElementById('fenOut');
+  const btnSuggest = document.getElementById('btnSuggest');
+  const btnClear = document.getElementById('btnClear');
+  const btnStartpos = document.getElementById('btnStartpos');
+  const btnToLichess = document.getElementById('btnToLichess');
+  const btnCopyFen = document.getElementById('btnCopyFen');
+
+  const wck = document.getElementById('wck');
+  const wcq = document.getElementById('wcq');
+  const bck = document.getElementById('bck');
+  const bcq = document.getElementById('bcq');
+  const ep = document.getElementById('ep');
+  const halfmove = document.getElementById('halfmove');
+  const fullmove = document.getElementById('fullmove');
+
+  let currentStream = null;
+  let currentDeviceId = null;
+  let devices = [];
+  let latestImage = null; // Image bitmap of the last shot / upload
+  let warpedImage = null; // Offscreen canvas of warped board
+
+  const isSecure = () => location.protocol === 'https:' || ['localhost','127.0.0.1'].includes(location.hostname);
+  const updateStatus = (msg, isErr=false) => { statusEl.textContent = msg; statusEl.className = isErr ? 'notice error' : 'notice'; };
+
+  async function listCameras(){
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      devices = all.filter(d => d.kind === 'videoinput');
+      cameraSelect.innerHTML='';
+      if (!devices.length){
+        const opt = document.createElement('option'); opt.value=''; opt.textContent='Keine Kamera gefunden'; cameraSelect.appendChild(opt); return;
+      }
+      devices.forEach((d,i)=>{ const opt=document.createElement('option'); opt.value=d.deviceId; opt.textContent=d.label||`Kamera ${i+1}`; cameraSelect.appendChild(opt); });
+      const env = devices.find(d=>/back|rear|environment/i.test(d.label)); if (env) cameraSelect.value=env.deviceId;
+    } catch(e){ console.warn(e); }
+  }
+
+  async function startStream(deviceId){
+    if (!navigator.mediaDevices?.getUserMedia){ updateStatus('Browser unterstützt keine Kamera-API. Nutze den Datei-Upload.', true); return; }
+    if (!isSecure()) updateStatus('Hinweis: Kamerazugriff benötigt HTTPS oder localhost.', true);
+    try{
+      stopStream();
+      const constraints={ audio:false, video: deviceId?{deviceId:{exact:deviceId}}:{ facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080} } };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      currentStream = stream; const track = stream.getVideoTracks()[0]; currentDeviceId = track.getSettings().deviceId||deviceId||null;
+      video.srcObject=stream; await video.play(); await listCameras(); if (currentDeviceId) cameraSelect.value=currentDeviceId;
+      updateStatus('Kamera aktiv. Richte das Brett möglichst vollständig im Bild aus.');
+    }catch(err){ console.error(err); updateStatus(err.message||'Fehler beim Kamerazugriff', true); }
+  }
+  function stopStream(){ if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); currentStream=null; updateStatus('Kamera gestoppt.'); } }
+  function nextCameraId(){ if(!devices.length) return null; if(!currentDeviceId) return devices[0].deviceId; const idx=devices.findIndex(d=>d.deviceId===currentDeviceId); const n=devices[(idx+1)%devices.length]; return n?.deviceId||devices[0].deviceId; }
+
+  function drawToPhotoCanvas(img){
+    const maxW = 1200; const scale = Math.min(1, maxW / img.width);
+    const w = Math.round(img.width * scale); const h = Math.round(img.height * scale);
+    photoCanvas.width = w; photoCanvas.height = h; ctxPhoto.drawImage(img, 0, 0, w, h);
+    // place handles at image corners by default
+    const rect = photoCanvas.getBoundingClientRect();
+    const pos = [ [10,10], [w-32,10], [w-32,h-32], [10,h-32] ];
+    [0,1,2,3].forEach(i=>{ const el=handles[i]; el.style.left=pos[i][0]+'px'; el.style.top=pos[i][1]+'px'; el.style.right=''; el.style.bottom=''; });
+  }
+
+  async function takeShot(){
+    if (!currentStream){ updateStatus('Kamera ist nicht aktiv.', true); return; }
+    const tmp = document.createElement('canvas');
+    tmp.width = video.videoWidth; tmp.height = video.videoHeight; tmp.getContext('2d').drawImage(video,0,0);
+    const img = new Image(); img.onload = ()=>{ latestImage = img; drawToPhotoCanvas(img); pushShotPreview(tmp.toDataURL('image/jpeg',0.9)); };
+    img.src = tmp.toDataURL('image/jpeg',0.9);
+  }
+
+  function pushShotPreview(dataUrl){ const c=document.createElement('div'); c.className='shot'; const i=new Image(); i.src=dataUrl; c.appendChild(i); shots.prepend(c); }
+
+  // Drag handles (touch + mouse)
+  handles.forEach(h=>{
+    let dragging=false, offX=0, offY=0;
+    const start=(e)=>{ dragging=true; const p=getPoint(e); offX=p.x - h.offsetLeft; offY=p.y - h.offsetTop; e.preventDefault(); };
+    const move=(e)=>{ if(!dragging) return; const p=getPoint(e); h.style.left=(p.x-offX)+'px'; h.style.top=(p.y-offY)+'px'; };
+    const end=()=> dragging=false;
+    h.addEventListener('mousedown', start); h.addEventListener('touchstart', start, {passive:false});
+    window.addEventListener('mousemove', move); window.addEventListener('touchmove', move, {passive:false});
+    window.addEventListener('mouseup', end); window.addEventListener('touchend', end);
+  });
+  function getPoint(e){ if (e.touches?.[0]){ const r=photoCanvas.getBoundingClientRect(); return { x: e.touches[0].clientX - r.left, y: e.touches[0].clientY - r.top }; } const r=photoCanvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+
+  function getHandlePoints(){ const r=photoCanvas.getBoundingClientRect(); const scaleX = photoCanvas.width / r.width; const scaleY = photoCanvas.height / r.height; return handles.map(h=>({ x: (h.offsetLeft)*scaleX, y: (h.offsetTop)*scaleY })); }
+
+  function autoFindCorners(){
+    if(!latestImage){ updateStatus('Kein Bild vorhanden.', true); return; }
+    try{ const src = cv.imread(photoCanvas); let gray=new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+      cv.GaussianBlur(gray, gray, new cv.Size(5,5), 0, 0, cv.BORDER_DEFAULT);
+      let edges=new cv.Mat(); cv.Canny(gray, edges, 60, 180);
+      // Find largest contour (assume board)
+      let contours = new cv.MatVector(); let hierarchy = new cv.Mat(); cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+      let best=null, bestArea=0; for(let i=0;i<contours.size();i++){ let c=contours.get(i); let peri=cv.arcLength(c,true); let approx=new cv.Mat(); cv.approxPolyDP(c, approx, 0.02*peri, true); if(approx.rows===4){ let area=cv.contourArea(approx); if(area>bestArea){ best=approx; bestArea=area; } } }
+      if(best){ // order approx points TL,TR,BR,BL
+        const pts=[]; for(let i=0;i<4;i++){ pts.push({x:best.intPtr(i,0)[0], y:best.intPtr(i,0)[1]}); }
+        pts.sort((a,b)=>a.y-b.y); const top=pts.slice(0,2).sort((a,b)=>a.x-b.x); const bot=pts.slice(2).sort((a,b)=>a.x-b.x);
+        const ordered=[top[0], top[1], bot[1], bot[0]]; // TL,TR,BR,BL
+        const r=photoCanvas.getBoundingClientRect(); const scaleX = r.width / photoCanvas.width; const scaleY = r.height / photoCanvas.height;
+        ordered.forEach((p,i)=>{ handles[i].style.left=(p.x*scaleX)+'px'; handles[i].style.top=(p.y*scaleY)+'px'; });
+        updateStatus('Ecken automatisch gesetzt. Bitte kurz prüfen.');
+      } else { updateStatus('Keine Brettkontur gefunden. Bitte Ecken manuell ziehen.', true); }
+      src.delete(); gray.delete(); edges.delete(); contours.delete(); hierarchy.delete(); if(best) best.delete?.();
+    }catch(e){ console.warn(e); updateStatus('Auto-Erkennung nicht verfügbar (OpenCV noch nicht geladen?).', true); }
+  }
+
+  function warpBoard(){
+    if(!latestImage){ updateStatus('Kein Bild vorhanden.', true); return; }
+    try{ const pts = getHandlePoints(); // TL, TR, BR, BL
+      const destSize = 800; // square
+      const srcMat = cv.imread(photoCanvas);
+      const srcTri = cv.matFromArray(4,1,cv.CV_32FC2, new Float32Array([ pts[0].x,pts[0].y, pts[1].x,pts[1].y, pts[2].x,pts[2].y, pts[3].x,pts[3].y ]));
+      const dstTri = cv.matFromArray(4,1,cv.CV_32FC2, new Float32Array([ 0,0, destSize,0, destSize,destSize, 0,destSize ]));
+      const M = cv.getPerspectiveTransform(srcTri, dstTri);
+      let dst = new cv.Mat(); const dsize = new cv.Size(destSize,destSize); cv.warpPerspective(srcMat, dst, M, dsize, cv.INTER_LINEAR, cv.BORDER_REPLICATE, new cv.Scalar());
+      // draw to offscreen canvas
+      const off = document.createElement('canvas'); off.width=destSize; off.height=destSize; cv.imshow(off, dst); warpedImage = off; renderBoardFromImage(off);
+      srcMat.delete(); srcTri.delete(); dstTri.delete(); M.delete(); dst.delete();
+      updateStatus('Brett entzerrt. Prüfe die 64 Felder.');
+    }catch(e){ console.warn(e); updateStatus('Entzerren fehlgeschlagen. Ecken neu setzen und erneut versuchen.', true); }
+  }
+
+  // ======= Board model (state) =======
+  // Board is 8x8 from rank 8 to 1 and file a to h. We'll maintain array [rank][file]
+  const files = ['a','b','c','d','e','f','g','h'];
+  let board = Array.from({length:8}, ()=> Array(8).fill('')); // '' empty or piece code like 'P','n' ...
+
+  const PIECES = ['K','Q','R','B','N','P','k','q','r','b','n','p'];
+  const PIECE_LABELS = {K:'♔',Q:'♕',R:'♖',B:'♗',N:'♘',P:'♙',k:'♚',q:'♛',r:'♜',b:'♝',n:'♞',p:'♟︎'};
+
+  function buildPalette(){
+    palette.innerHTML='';
+    const opts = ['(leer)',...PIECES];
+    opts.forEach(v=>{
+      const btn=document.createElement('button'); btn.className='chip'; btn.type='button'; btn.textContent = v==='(leer)'?v:PIECE_LABELS[v]+" "+v;
+      btn.dataset.value = v==='(leer)'?'':v; btn.onclick = ()=>{ palette.querySelectorAll('.chip').forEach(x=>x.setAttribute('aria-pressed','false')); btn.setAttribute('aria-pressed','true'); selectedPiece = btn.dataset.value; };
+      palette.appendChild(btn);
+    });
+    palette.firstChild.click();
+  }
+
+  let selectedPiece = '';
+
+  function renderBoardFromState(){
+    boardGrid.innerHTML='';
+    for(let r=0;r<8;r++){
+      for(let f=0;f<8;f++){
+        const el=document.createElement('div'); el.className='sq'; el.dataset.dark = ((r+f)%2)?'1':'0'; el.dataset.r=r; el.dataset.f=f;
+        const v = board[r][f];
+        if (v){ el.textContent = PIECE_LABELS[v]; }
+        el.onclick = ()=>{ board[r][f] = selectedPiece; renderBoardFromState(); updateFen(); };
+        el.oncontextmenu = (e)=>{ e.preventDefault(); board[r][f]=''; renderBoardFromState(); updateFen(); };
+        el.addEventListener('touchstart', (e)=>{ if(e.touches.length>1){ board[r][f]=''; renderBoardFromState(); updateFen(); } }, {passive:true});
+        boardGrid.appendChild(el);
+      }
+    }
+    updateFen();
+  }
+
+  function renderBoardFromImage(img){
+    // slice 8x8 and do simple occupancy guess using edge density (very rough). Types remain empty for manual correction.
+    const cell = document.createElement('canvas'); const cc = cell.getContext('2d'); const sz = Math.floor(img.width/8);
+    for(let r=0;r<8;r++) for(let f=0;f<8;f++){ cc.clearRect(0,0,sz,sz); cc.canvas.width=sz; cc.canvas.height=sz; cc.drawImage(img, f*sz, r*sz, sz, sz, 0,0,sz,sz); const id=cc.getImageData(0,0,sz,sz);
+      // edge density heuristic
+      let edges=0; for(let i=0;i<id.data.length;i+=4){ const l = 0.2126*id.data[i]+0.7152*id.data[i+1]+0.0722*id.data[i+2]; if(l<80||l>200) edges++; }
+      const density = edges / (id.data.length/4);
+      board[r][f] = density>0.35 ? 'p' : ''; // assume some piece, default to black pawn (user will correct)
+    }
+    renderBoardFromState();
+  }
+
+  function updateFen(){
+    // ranks 8->1 : r=0 corresponds to top (rank 8)
+    const parts=[]; for(let r=0;r<8;r++){ let run=0, row=''; for(let f=0;f<8;f++){ const v=board[r][f]; if(!v){ run++; } else { if(run){ row+=String(run); run=0; } row+=v; } } if(run) row+=String(run); parts.push(row||'8'); }
+    const boardFen = parts.join('/');
+    const turn = (document.querySelector('input[name="turn"]:checked')?.value)||'w';
+    const castle = [(wck.checked?'K':''),(wcq.checked?'Q':''),(bck.checked?'k':''),(bcq.checked?'q':'')].join('') || '-';
+    const epStr = (ep.value||'-') || '-';
+    const hm = (halfmove.value||'0');
+    const fm = (fullmove.value||'1');
+    const fen = `${boardFen} ${turn} ${castle} ${epStr} ${hm} ${fm}`;
+    fenOut.textContent = fen;
+    return fen;
+  }
+
+  function clearBoard(){ board = Array.from({length:8},()=>Array(8).fill('')); renderBoardFromState(); }
+  function setStartpos(){ const rows = ['rnbqkbnr','pppppppp','8','8','8','8','PPPPPPPP','RNBQKBNR']; for(let r=0;r<8;r++){ let f=0; for(const ch of rows[r]){ if(/[1-8]/.test(ch)){ f+=parseInt(ch); } else { board[r][f]=ch; f++; } } } renderBoardFromState(); }
+
+  function toLichess(){ const fen = updateFen(); const fenEnc = encodeURIComponent(fen); const url = `https://lichess.org/analysis/standard/${fenEnc}`; window.open(url, '_blank'); }
+  async function copyFen(){ const fen = updateFen(); try{ await navigator.clipboard.writeText(fen); updateStatus('FEN kopiert.'); }catch{ updateStatus('Konnte FEN nicht in die Zwischenablage schreiben.', true); } }
+
+  function autoSuggest(){ if(!warpedImage){ updateStatus('Bitte erst entzerren.', true); return; } renderBoardFromImage(warpedImage); updateStatus('Grobes Auto-Ergebnis gesetzt. Bitte manuell prüfen.'); }
+
+  // build UI
+  buildPalette(); renderBoardFromState();
+
+  // events
+  btnStart.addEventListener('click', ()=> startStream(cameraSelect.value||undefined));
+  btnStop.addEventListener('click', stopStream);
+  btnFlip.addEventListener('click', async ()=>{ await listCameras(); const id=nextCameraId(); if(id) startStream(id); });
+  btnShoot.addEventListener('click', takeShot);
+  cameraSelect.addEventListener('change', ()=> startStream(cameraSelect.value));
+  fileFallback.addEventListener('change', (e)=>{ const file=e.target.files?.[0]; if(!file) return; const url=URL.createObjectURL(file); const img=new Image(); img.onload=()=>{ latestImage=img; drawToPhotoCanvas(img); pushShotPreview(url); }; img.src=url; });
+
+  btnAutoCorners.addEventListener('click', autoFindCorners);
+  btnWarp.addEventListener('click', warpBoard);
+
+  btnSuggest.addEventListener('click', autoSuggest);
+  btnClear.addEventListener('click', clearBoard);
+  btnStartpos.addEventListener('click', setStartpos);
+  btnToLichess.addEventListener('click', toLichess);
+  btnCopyFen.addEventListener('click', copyFen);
+
+  // init
+  (async function init(){ if(!('mediaDevices' in navigator)){ updateStatus('Browser unterstützt keinen Kamerazugriff. Verwende Datei-Upload.', true); } await listCameras(); })();
+  window.addEventListener('pagehide', stopStream);
+})();
+</script></body>
+</html>
