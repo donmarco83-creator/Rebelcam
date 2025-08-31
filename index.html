@@ -44,17 +44,21 @@
     .handle{position:absolute;width:22px;height:22px;border-radius:50%;background:#fff;border:3px solid #2563eb;box-shadow:0 8px 20px rgba(0,0,0,.4);
       transform:translate(-50%,-50%);touch-action:none}
 
-    /* Warp+Overlay (Erkennung) */
+    /* Warp + Overlay */
     .previewStack{position:relative;max-width:820px;margin:auto}
     #warpPreview{width:100%;height:auto;display:block;background:#000;border:1px solid var(--border);border-radius:12px}
-    #anno{position:absolute;inset:0;pointer-events:auto}
+    /* Overlay exakt zur Vorschau skalieren */
+    #anno{
+      position:absolute; inset:0;
+      width:100%; height:100%;
+      pointer-events:auto;
+    }
 
     /* Palette */
     .palette{display:flex;flex-wrap:wrap;gap:6px}
     .pieceBtn{font-size:20px;line-height:1;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0f172a;color:#fff;cursor:pointer}
     .pieceBtn.active{outline:2px solid #60a5fa}
     .small{font-size:14px}
-
     .util{display:flex;flex-wrap:wrap;gap:8px}
     .util a{color:#93c5fd}
   </style>
@@ -159,7 +163,7 @@
         <div class="pieceBtn" data-piece="q">♛</div>
         <div class="pieceBtn" data-piece="k">♚</div>
       </div>
-      <p style="color:#9ca3af;margin-top:8px">Tipp auf ein Feld setzt die aktuell gewählte Figur. Doppeltipp entleert ein Feld.</p>
+      <p style="color:#9ca3af;margin-top:8px">Tipp auf ein Feld setzt die gewählte Figur. Doppeltipp entleert ein Feld.</p>
 
       <div class="row" style="margin-top:10px;">
         <div class="grow">
@@ -175,7 +179,7 @@
 <!-- OpenCV -->
 <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
 <script>
-/* ====== DOM ====== */
+/* ===== DOM ===== */
 const video = document.getElementById('video');
 const btnStart = document.getElementById('btnStart');
 const btnShoot = document.getElementById('btnShoot');
@@ -222,8 +226,8 @@ let currentTool = ''; // '', P,N,B,R,Q,K or lowercase
 
 /* ===== State ===== */
 let currentStream = null;
-let latestImage = null;   // aufgenommenes Foto
-let warpedImage = null;   // entzerrtes Canvas (Canvas-Element)
+let latestImage = null;
+let warpedImage = null;
 let predictedBoard = Array.from({length:8}, ()=>Array(8).fill(''));
 let board = Array.from({length:8}, ()=>Array(8).fill(''));
 
@@ -233,6 +237,26 @@ const updateStatus = (msg, isErr=false)=>{
   statusEl.style.color = isErr ? '#f87171' : '#94a3b8';
 };
 const showDiag = (txt)=>{ diag.style.display='block'; diag.textContent=txt; };
+
+/* ===== Overlay-Größe mit Vorschau synchronisieren ===== */
+function syncOverlaySize(){
+  const rect = warpPreview.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+
+  // CSS-Größe
+  anno.style.width  = rect.width + 'px';
+  anno.style.height = rect.height + 'px';
+
+  // interner Buffer in Device-Pixeln
+  const needW = Math.round(rect.width  * dpr);
+  const needH = Math.round(rect.height * dpr);
+  if (anno.width !== needW || anno.height !== needH){
+    anno.width  = needW;
+    anno.height = needH;
+  }
+  // 1 Canvas-Einheit == 1 CSS-Pixel
+  ctxAnno.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
 
 /* ===== Kamera ===== */
 async function listCameras(){
@@ -276,7 +300,7 @@ document.addEventListener('visibilitychange', async ()=>{
   if(!document.hidden && currentStream && video.paused){ try{ await video.play(); }catch{} }
 });
 
-/* ===== Foto aufnehmen (Tap-to-Shoot überall) ===== */
+/* ===== Foto (Tap-to-Shoot überall) ===== */
 function takeShot(){
   if(!video.videoWidth){ updateStatus('Video noch nicht bereit.', true); return; }
   const vw=video.videoWidth, vh=video.videoHeight;
@@ -442,13 +466,19 @@ function warpBoard(){
     const M=cv.getPerspectiveTransform(srcTri,dstTri);
     let dst=new cv.Mat(); cv.warpPerspective(srcMat,dst,M,new cv.Size(dest,dest),cv.INTER_LINEAR,cv.BORDER_REPLICATE);
 
-    warpPreview.width=dest; warpPreview.height=dest; anno.width=dest; anno.height=dest;
+    warpPreview.width=dest; warpPreview.height=dest;
     const tmp=document.createElement('canvas'); tmp.width=dest; tmp.height=dest; cv.imshow(tmp,dst);
     ctxPreview.clearRect(0,0,dest,dest); ctxPreview.drawImage(tmp,0,0); drawGrid();
-    warpedImage=tmp; clearOverlay(); predictedBoard = Array.from({length:8}, ()=>Array(8).fill('')); board = predictedBoard.map(r=>r.slice());
-    fenOut.value='';
+    warpedImage=tmp;
 
     srcMat.delete(); srcTri.delete(); dstTri.delete(); M.delete(); dst.delete();
+
+    // Overlay korrekt zur sichtbaren Größe ausrichten
+    syncOverlaySize();
+    clearOverlay();
+    predictedBoard = Array.from({length:8}, ()=>Array(8).fill(''));
+    board = predictedBoard.map(r=>r.slice());
+    fenOut.value='';
     updateStatus('Brett entzerrt. Optional Regler anpassen, dann „Stellung erkennen“.');
   }catch(e){ updateStatus('Entzerren fehlgeschlagen: '+e, true); }
 }
@@ -464,90 +494,75 @@ function autoOrientWhiteBottomRight(){
   if(!warpedImage){ updateStatus('Kein entzerrtes Bild.', true); return; }
   const rotations=[0,90,180,270]; let best=0, bestScore=-1;
   for(let i=0;i<4;i++){
-    // draw rotated into temp canvas
     const c=document.createElement('canvas'); c.width=800; c.height=800;
     const x=c.getContext('2d'); x.translate(400,400); x.rotate(rotations[i]*Math.PI/180); x.drawImage(warpedImage,-400,-400);
-    // measure brightness bottom-right
     let g=cv.imread(c); cv.cvtColor(g,g,cv.COLOR_RGBA2GRAY);
-    const br = meanBrightOfSquare(7,7,g), bl=meanBrightOfSquare(7,6,g);
-    const tr = meanBrightOfSquare(0,7,g), tl=meanBrightOfSquare(0,0,g);
-    const score = br - tl; // grob: hell unten rechts, dunkel oben links
+    const br = meanBrightOfSquare(7,7,g), tl=meanBrightOfSquare(0,0,g);
+    const score = br - tl;
     g.delete();
     if(score>bestScore){ bestScore=score; best=i; }
   }
-  // apply best
   const x=ctxPreview; x.clearRect(0,0,800,800);
   x.save(); x.translate(400,400); x.rotate(rotations[best]*Math.PI/180); x.drawImage(warpedImage,-400,-400); x.restore();
   drawGrid();
-  // update warpedImage to new orientation
   const newC=document.createElement('canvas'); newC.width=800; newC.height=800; newC.getContext('2d').drawImage(warpPreview,0,0);
-  warpedImage=newC; clearOverlay();
+  warpedImage=newC; syncOverlaySize(); clearOverlay();
   updateStatus('Ausrichtung gesetzt: Weiß unten rechts.');
 }
 
 /* ===== Brightness/Contrast (für Erkennung) ===== */
 function preprocessForDetection(){
-  // erzeugt cv.Mat (GRAY) mit Helligkeit/Kontrast-Anpassung
   let src=cv.imread(warpedImage);
   let out=new cv.Mat(); src.convertTo(out, -1, 1 + (Number(rngContrast.value)||0)/50, (Number(rngBright.value)||0)*2.5);
   cv.cvtColor(out,out,cv.COLOR_RGBA2GRAY);
   src.delete();
-  return out; // Mat GRAY
+  return out;
 }
 
-/* ===== Erkennung: Belegung + Farbe (heuristisch) ===== */
+/* ===== Erkennung: sehr einfache Heuristik (Bauer + Farbe) ===== */
 function detectBoard(){
   if(!warpedImage){ updateStatus('Kein entzerrtes Bild.', true); return; }
-  let gray = preprocessForDetection(); // cv.Mat GRAY
-  // global Kantenmaß
+  let gray = preprocessForDetection();
   let lap=new cv.Mat(); cv.Laplacian(gray, lap, cv.CV_16S, 3, 1, 0, cv.BORDER_DEFAULT);
   let absLap=new cv.Mat(); cv.convertScaleAbs(lap, absLap);
   const s=warpPreview.width, cell = Math.floor(s/8);
-  // Referenz-Helligkeit hell/dunkel Felder
+
+  // Referenz hell/dunkel
   let sumLight=0, cntLight=0, sumDark=0, cntDark=0;
   for(let r=0;r<8;r++) for(let c=0;c<8;c++){
     const m=meanBrightOfSquare(r,c,gray);
     if( (r+c)%2===0 ){ sumLight+=m; cntLight++; } else { sumDark+=m; cntDark++; }
   }
-  const meanLight = sumLight/cntLight, meanDark = sumDark/cntDark;
+  const meanLight=sumLight/cntLight, meanDark=sumDark/cntDark;
 
-  let occ = Array.from({length:8}, ()=>Array(8).fill(false));
   let guess = Array.from({length:8}, ()=>Array(8).fill(''));
-  let tileVals=[];
-  // global Schwelle für Besetzung
   let globalVals=[];
   for(let r=0;r<8;r++) for(let c=0;c<8;c++){
     const x=c*cell, y=r*cell, pad=Math.floor(cell*0.15);
     const roi = absLap.roi(new cv.Rect(x+pad,y+pad,cell-2*pad,cell-2*pad));
-    const meanK = cv.mean(roi)[0]; roi.delete();
-    globalVals.push(meanK);
+    globalVals.push(cv.mean(roi)[0]); roi.delete();
   }
   globalVals.sort((a,b)=>a-b);
-  const medK = globalVals[Math.floor(globalVals.length*0.5)] || 0;
-  const thrK = medK*1.6 + 8; // heuristisch
+  const medK=globalVals[Math.floor(globalVals.length*0.5)]||0;
+  const thrK=medK*1.6+8;
 
   for(let r=0;r<8;r++){
     for(let c=0;c<8;c++){
-      const x=c*cell, y=r*cell;
-      const pad=Math.floor(cell*0.15);
+      const x=c*cell, y=r*cell, pad=Math.floor(cell*0.15);
       const roiK = absLap.roi(new cv.Rect(x+pad,y+pad,cell-2*pad,cell-2*pad));
       const kVal = cv.mean(roiK)[0]; roiK.delete();
       const roiG = gray.roi(new cv.Rect(x+pad,y+pad,cell-2*pad,cell-2*pad));
       const gVal = cv.mean(roiG)[0]; roiG.delete();
 
       const bg = ((r+c)%2===0) ? meanLight : meanDark;
-      const contrastToBg = Math.abs(gVal - bg);
-
-      const occupied = (kVal>thrK) || (contrastToBg > 12);
-      occ[r][c]=occupied;
+      const occupied = (kVal>thrK) || (Math.abs(gVal - bg) > 12);
       if(!occupied){ guess[r][c]=''; continue; }
 
-      // Farbe schätzen: ist Zentrum heller als Hintergrund? (weiß) sonst schwarz
       const centerPad=Math.floor(cell*0.30);
       const roiC = gray.roi(new cv.Rect(x+centerPad,y+centerPad,cell-2*centerPad,cell-2*centerPad));
       const centerMean = cv.mean(roiC)[0]; roiC.delete();
       const isWhite = centerMean > bg + 6;
-      guess[r][c] = isWhite ? 'P' : 'p'; // Typ = erstmal Bauer
+      guess[r][c] = isWhite ? 'P' : 'p';
     }
   }
   lap.delete(); absLap.delete(); gray.delete();
@@ -558,27 +573,30 @@ function detectBoard(){
   updateStatus('Erkennung ausgeführt. Tipp ein Feld an, um zu korrigieren. Danach FEN kopieren/öffnen.');
 }
 
-/* ===== Board Overlay / Edit ===== */
+/* ===== Overlay / Edit ===== */
 function clearOverlay(){ ctxAnno.clearRect(0,0,anno.width,anno.height); }
 function redrawOverlay(){
-  clearOverlay();
-  const s=anno.width, cell=s/8;
+  syncOverlaySize(); // sicherstellen, dass Maße passen
+
+  // In CSS-Pixeln zeichnen (clientWidth/Height), Font-Größe passt dann immer
+  const s = anno.clientWidth;
+  const cell = s / 8;
+
+  ctxAnno.clearRect(0,0,anno.clientWidth,anno.clientHeight);
   ctxAnno.save();
-  ctxAnno.textAlign='center'; ctxAnno.textBaseline='middle';
+  ctxAnno.textAlign='center';
+  ctxAnno.textBaseline='middle';
   ctxAnno.font = (cell*0.6)+'px system-ui';
+
   for(let r=0;r<8;r++){
     for(let c=0;c<8;c++){
-      const ch=board[r][c];
-      if(!ch) continue;
+      const ch=board[r][c]; if(!ch) continue;
       const isWhite = (ch===ch.toUpperCase());
-      const sym = {
-        'P':'♙','N':'♘','B':'♗','R':'♖','Q':'♕','K':'♔',
-        'p':'♟','n':'♞','b':'♝','r':'♜','q':'♛','k':'♚'
-      }[ch] || ch;
+      const sym = { 'P':'♙','N':'♘','B':'♗','R':'♖','Q':'♕','K':'♔','p':'♟','n':'♞','b':'♝','r':'♜','q':'♛','k':'♚' }[ch] || ch;
       ctxAnno.fillStyle = isWhite ? '#f8fafc' : '#111827';
-      // dunkler Rand für weiße Figuren auf hellen Feldern
-      ctxAnno.strokeStyle = 'rgba(0,0,0,.6)'; ctxAnno.lineWidth=2;
-      const cx=c*cell+cell/2, cy=r*cell+cell/2;
+      ctxAnno.strokeStyle = 'rgba(0,0,0,.6)';
+      ctxAnno.lineWidth = 2;
+      const cx=c*cell + cell/2, cy=r*cell + cell/2;
       ctxAnno.strokeText(sym, cx, cy);
       ctxAnno.fillText(sym, cx, cy);
     }
@@ -596,9 +614,8 @@ let lastTap=0;
 anno.addEventListener('click', (e)=>{
   const now=Date.now();
   const {r,c}=canvasToSquareCoords(e.clientX,e.clientY);
-  if(now-lastTap<300){ board[r][c]=''; redrawOverlay(); updateFEN(); lastTap=0; return; } // Doppeltipp leert Feld
+  if(now-lastTap<300){ board[r][c]=''; redrawOverlay(); updateFEN(); lastTap=0; return; }
   lastTap=now;
-  if(currentTool===undefined) return;
   board[r][c]=currentTool;
   redrawOverlay(); updateFEN();
 });
@@ -611,7 +628,6 @@ document.querySelector('.pieceBtn[data-piece=""]').classList.add('active'); curr
 
 /* ===== FEN ===== */
 function boardToFEN(bd){
-  // FEN verlangt Reihen 8->1 (oben nach unten). Unser r=0 ist oben.
   const rows=[];
   for(let r=0;r<8;r++){
     let line='', empty=0;
@@ -625,10 +641,7 @@ function boardToFEN(bd){
   }
   return rows.join('/')+' w - - 0 1';
 }
-function updateFEN(){
-  const fen = boardToFEN(board);
-  fenOut.value = fen;
-}
+function updateFEN(){ fenOut.value = boardToFEN(board); }
 
 /* ===== Aktionen ===== */
 function drawGridAndImage(){
@@ -649,50 +662,38 @@ btnSnapRect.addEventListener('click', snapToOrthogonal);
 
 btnAutoOrient.addEventListener('click', ()=>{ if(!warpedImage){ updateStatus('Kein entzerrtes Bild.',true); return; } autoOrientWhiteBottomRight(); redrawOverlay(); updateFEN(); });
 
-rngBright.addEventListener('input', ()=>{ lblBright.textContent=rngBright.value; });
-rngContrast.addEventListener('input', ()=>{ lblContrast.textContent=rngContrast.value; });
+rngBright.addEventListener('input', ()=>{ lblBright.textContent=rngBright.value; drawGridAndImage(); redrawOverlay(); });
+rngContrast.addEventListener('input', ()=>{ lblContrast.textContent=rngContrast.value; drawGridAndImage(); redrawOverlay(); });
 
 btnDetect.addEventListener('click', ()=>{ detectBoard(); });
 btnResetPred.addEventListener('click', ()=>{ board = predictedBoard.map(r=>r.slice()); redrawOverlay(); updateFEN(); });
 btnClear.addEventListener('click', ()=>{ board = Array.from({length:8},()=>Array(8).fill('')); redrawOverlay(); updateFEN(); });
 
-btnCopyFEN.addEventListener('click', async ()=>{
-  try{ await navigator.clipboard.writeText(fenOut.value||''); updateStatus('FEN kopiert.'); }catch(e){ updateStatus('Kopieren nicht möglich.',true); }
-});
-btnLichess.addEventListener('click', ()=>{
-  const fen=encodeURIComponent(fenOut.value||'');
-  const url=`https://lichess.org/analysis/fromPosition?fen=${fen}`;
-  window.open(url, '_blank');
-});
+btnCopyFEN.addEventListener('click', async ()=>{ try{ await navigator.clipboard.writeText(fenOut.value||''); updateStatus('FEN kopiert.'); }catch(e){ updateStatus('Kopieren nicht möglich.',true); } });
+btnLichess.addEventListener('click', ()=>{ const fen=encodeURIComponent(fenOut.value||''); window.open(`https://lichess.org/analysis/fromPosition?fen=${fen}`, '_blank'); });
 
-btnRetake.addEventListener('click', ()=>{
-  // nach oben scrollen & Kamera wieder zeigen
-  window.scrollTo({top:0, behavior:'smooth'});
-  updateStatus('Bereit zum Neuaufnehmen. Starte ggf. die Kamera.', false);
-});
-btnSaveImage.addEventListener('click', ()=>{
-  if(!warpedImage){ updateStatus('Kein Bild zum Speichern.', true); return; }
-  const a=document.createElement('a');
-  a.href=warpedImage.toDataURL('image/jpeg',0.95);
-  a.download='schachbrett.jpg'; a.click();
-});
-btnShareImage.addEventListener('click', async ()=>{
-  if(!warpedImage){ updateStatus('Kein Bild zum Teilen.', true); return; }
+btnRetake.addEventListener('click', ()=>{ window.scrollTo({top:0, behavior:'smooth'}); updateStatus('Bereit zum Neuaufnehmen. Starte ggf. die Kamera.', false); });
+btnSaveImage.addEventListener('click', ()=>{ if(!warpedImage){ updateStatus('Kein Bild zum Speichern.', true); return; } const a=document.createElement('a'); a.href=warpedImage.toDataURL('image/jpeg',0.95); a.download='schachbrett.jpg'; a.click(); });
+btnShareImage.addEventListener('click', async ()=>{ if(!warpedImage){ updateStatus('Kein Bild zum Teilen.', true); return; }
   try{
     const blob = await new Promise(res=> warpedImage.toBlob(res,'image/jpeg',0.95));
-    if(navigator.canShare && navigator.canShare({files:[new File([blob],'schachbrett.jpg',{type:'image/jpeg'})]})){
-      await navigator.share({ files:[new File([blob],'schachbrett.jpg',{type:'image/jpeg'})], title:'Schachbrett', text:fenOut.value });
+    const file = new File([blob],'schachbrett.jpg',{type:'image/jpeg'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      await navigator.share({ files:[file], title:'Schachbrett', text:fenOut.value });
     }else{
-      // Fallback: Link kopieren
       await navigator.clipboard.writeText(fenOut.value||'');
       updateStatus('Teilen nicht unterstützt – FEN in Zwischenablage kopiert.');
     }
   }catch(e){ updateStatus('Teilen abgebrochen oder nicht möglich.', true); }
 });
 
+/* Resize: Overlay synchron halten */
+window.addEventListener('resize', ()=>{ syncOverlaySize(); redrawOverlay(); });
+
 /* ===== Init ===== */
 if (location.protocol!=='https:') showDiag('Hinweis: Für den Kamerazugriff ist HTTPS nötig (GitHub Pages URL mit https://).');
 if ('mediaDevices' in navigator){ listCameras(); }
+syncOverlaySize(); // initiale Synchronisation
 </script>
 </body>
 </html>
