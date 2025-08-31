@@ -278,7 +278,7 @@ canvas { display:block; width:100%; height:auto; }
       const M = cv.getPerspectiveTransform(srcTri, dstTri);
       let dst = new cv.Mat(); const dsize = new cv.Size(destSize,destSize); cv.warpPerspective(srcMat, dst, M, dsize, cv.INTER_LINEAR, cv.BORDER_REPLICATE, new cv.Scalar());
       // draw to offscreen canvas
-      const off = document.createElement('canvas'); off.width=destSize; off.height=destSize; cv.imshow(off, dst); warpedImage = off; renderBoardFromImage(off);
+      const off = document.createElement('canvas'); off.width=destSize; off.height=destSize; cv.imshow(off, dst); warpedImage = off; improvedRenderBoardFromImage(off);
       srcMat.delete(); srcTri.delete(); dstTri.delete(); M.delete(); dst.delete();
       updateStatus('Brett entzerrt. Prüfe die 64 Felder.');
     }catch(e){ console.warn(e); updateStatus('Entzerren fehlgeschlagen. Ecken neu setzen und erneut versuchen.', true); }
@@ -353,7 +353,7 @@ canvas { display:block; width:100%; height:auto; }
   function toLichess(){ const fen = updateFen(); const fenEnc = encodeURIComponent(fen); const url = `https://lichess.org/analysis/standard/${fenEnc}`; window.open(url, '_blank'); }
   async function copyFen(){ const fen = updateFen(); try{ await navigator.clipboard.writeText(fen); updateStatus('FEN kopiert.'); }catch{ updateStatus('Konnte FEN nicht in die Zwischenablage schreiben.', true); } }
 
-  function autoSuggest(){ if(!warpedImage){ updateStatus('Bitte erst entzerren.', true); return; } renderBoardFromImage(warpedImage); updateStatus('Grobes Auto-Ergebnis gesetzt. Bitte manuell prüfen.'); }
+  function autoSuggest(){ if(!warpedImage){ updateStatus('Bitte erst entzerren.', true); return; } improvedRenderBoardFromImage(warpedImage); updateStatus('Grobes Auto-Ergebnis gesetzt. Bitte manuell prüfen.'); }
 
   // build UI
   buildPalette(); renderBoardFromState();
@@ -379,5 +379,64 @@ canvas { display:block; width:100%; height:auto; }
   (async function init(){ if(!('mediaDevices' in navigator)){ updateStatus('Browser unterstützt keinen Kamerazugriff. Verwende Datei-Upload.', true); } await listCameras(); })();
   window.addEventListener('pagehide', stopStream);
 })();
+
+  // === Verbesserte Figuren-Erkennung ===
+  function improvedRenderBoardFromImage(img){
+    const cell = document.createElement('canvas');
+    const cc = cell.getContext('2d');
+    const sz = Math.floor(img.width/8);
+    const useCV = typeof cv !== 'undefined' && cv?.matFromArray;
+
+    for(let r=0;r<8;r++){
+      for(let f=0;f<8;f++){
+        cc.canvas.width=sz; cc.canvas.height=sz;
+        cc.drawImage(img, f*sz, r*sz, sz, sz, 0,0,sz,sz);
+
+        if(useCV){
+          // OpenCV-Pipeline
+          const src = cv.imread(cc.canvas); let gray=new cv.Mat();
+          cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+          // Lokaler Kontrast
+          let clahe = new cv.CLAHE(2.0, new cv.Size(8,8)); let eq = new cv.Mat();
+          clahe.apply(gray, eq);
+          // adaptiv thresholden und bereinigen
+          let bin = new cv.Mat(); cv.adaptiveThreshold(eq, bin, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 11, 2);
+          let kernel = cv.Mat.ones(3,3,cv.CV_8U); let opened = new cv.Mat();
+          cv.morphologyEx(bin, opened, cv.MORPH_OPEN, kernel);
+          // Konturenfläche
+          let contours=new cv.MatVector(); let hier=new cv.Mat();
+          cv.findContours(opened, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+          let areaSum=0; for(let i=0;i<contours.size();i++){ const a=cv.contourArea(contours.get(i)); if(a>40) areaSum+=a; }
+          const occupied = areaSum > (sz*sz*0.06);
+          // Farbe schätzen
+          let meanC=0, meanB=0, cntC=0, cntB=0; const data = cc.getImageData(0,0,sz,sz).data;
+          for(let y=0;y<sz;y++) for(let x=0;x<sz;x++){
+            const i=(y*sz+x)*4; const l=0.2126*data[i]+0.7152*data[i+1]+0.0722*data[i+2];
+            const inC = (x>sz*0.28&&x<sz*0.72&&y>sz*0.28&&y<sz*0.72);
+            if(inC){ meanC+=l; cntC++; } else if(x<sz*0.12||x>sz*0.88||y<sz*0.12||y>sz*0.88){ meanB+=l; cntB++; }
+          }
+          meanC/=Math.max(1,cntC); meanB/=Math.max(1,cntB);
+          const brighter = meanC - meanB;
+          let guess='';
+          if(occupied){
+            const density = areaSum/(sz*sz);
+            // einfache Heuristik: hohe Dichte => Bauer, mittlere => Springer/Läufer etc.
+            if(density>0.20){ guess = brighter>0 ? 'P' : 'p'; }
+            else if(density>0.12){ guess = brighter>0 ? 'N' : 'n'; }
+            else { guess = brighter>0 ? 'P' : 'p'; }
+          }
+          board[r][f] = guess;
+          src.delete(); gray.delete(); eq.delete(); bin.delete(); kernel.delete(); opened.delete(); contours.delete(); hier.delete(); clahe.delete();
+        } else {
+          // Fallback ohne OpenCV
+          const id=cc.getImageData(0,0,sz,sz);
+          let edges=0, mean=0; for(let i=0;i<id.data.length;i+=4){ const l=0.2126*id.data[i]+0.7152*id.data[i+1]+0.0722*id.data[i+2]; mean+=l; if(l<70||l>210) edges++; }
+          const density=edges/(id.data.length/4);
+          board[r][f] = density>0.30 ? 'p' : '';
+        }
+      }
+    }
+    renderBoardFromState();
+  }
 </script></body>
 </html>
