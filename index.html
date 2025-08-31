@@ -5,55 +5,40 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Schachbrett fotografieren & entzerren</title>
   <style>
-    :root { --bg:#0b1020; --panel:#0f172a; --text:#e5e7eb; --muted:#94a3b8; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; background:#0b1020; color:var(--text); }
-    header { padding:12px 14px; background:#111827; font-weight:700; }
-    main   { padding:12px; max-width:900px; margin:0 auto 60px; }
-    .card  { background:#0b1120; border:1px solid #1f2937; border-radius:14px; overflow:hidden; }
-    .hd    { padding:10px 12px; border-bottom:1px solid #1f2937; font-weight:700; background:#0d1428; }
-    .bd    { padding:12px; }
+    :root { --bg:#0b1020; --text:#e5e7eb; --muted:#94a3b8; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#0b1020;color:var(--text)}
+    header{padding:12px 14px;background:#111827;font-weight:700}
+    main{padding:12px;max-width:900px;margin:0 auto 60px}
+    .card{background:#0b1120;border:1px solid #1f2937;border-radius:14px;overflow:hidden}
+    .hd{padding:10px 12px;border-bottom:1px solid #1f2937;font-weight:700;background:#0d1428}
+    .bd{padding:12px}
 
-    /* Kamera-Preview */
-    .video-wrap { position:relative; aspect-ratio:1/1; border-radius:12px; overflow:hidden; background:#000; cursor:pointer; }
-    video { width:100%; height:100%; display:block; object-fit:cover; background:#000; }
-    #overlay { position:absolute; inset:0; pointer-events:none; border:2px dashed rgba(255,255,255,.25); }
-    #overlay .hline, #overlay .vline { position:absolute; background:rgba(255,255,255,.18); }
-    #overlay .hline { left:0; right:0; height:1px; top:50%; }
-    #overlay .vline { top:0; bottom:0; width:1px; left:50%; }
+    .video-wrap{position:relative;aspect-ratio:1/1;border-radius:12px;overflow:hidden;background:#000;cursor:pointer}
+    video{width:100%;height:100%;display:block;object-fit:cover;background:#000}
+    #overlay{position:absolute;inset:0;pointer-events:none;border:2px dashed rgba(255,255,255,.25)}
+    #overlay .hline,#overlay .vline{position:absolute;background:rgba(255,255,255,.18)}
+    #overlay .hline{left:0;right:0;height:1px;top:50%}
+    #overlay .vline{top:0;bottom:0;width:1px;left:50%}
 
-    /* Weißer Ring nur als Optik */
-    .shutter{
-      position:absolute; left:50%; bottom:14px; transform:translateX(-50%);
-      width:72px; height:72px; border-radius:50%;
-      background:transparent; border:none; padding:0;
-      display:grid; place-items:center;
-      pointer-events:none;
-    }
-    .shutter-inner{
-      width:72px; height:72px; border-radius:50%;
-      border:5px solid rgba(255,255,255,.95);
-      box-shadow:0 6px 24px rgba(0,0,0,.45);
-      background:transparent;
-      pointer-events:none;
-    }
+    /* Ring nur Optik – blockiert keine Klicks */
+    .shutter{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:72px;height:72px;border-radius:50%;
+      background:transparent;border:none;padding:0;display:grid;place-items:center;pointer-events:none}
+    .shutter-inner{width:72px;height:72px;border-radius:50%;border:5px solid rgba(255,255,255,.95);box-shadow:0 6px 24px rgba(0,0,0,.45);background:transparent;pointer-events:none}
 
-    .controls { display:flex; gap:8px; flex-wrap:wrap; }
-    button { padding:10px 12px; border-radius:10px; border:1px solid #1f2937; background:#1e3a8a; color:#fff; cursor:pointer; }
-    button.ghost { background:#374151; }
-    button.ok    { background:#059669; border-color:#04684e; }
-    select { padding:10px; border-radius:10px; border:1px solid #1f2937; background:#0b1120; color:#e5e7eb; }
-    p#status { color:var(--muted); margin:8px 0 0 0; }
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    button{padding:10px 12px;border-radius:10px;border:1px solid #1f2937;background:#1e3a8a;color:#fff;cursor:pointer}
+    button.ghost{background:#374151}
+    button.ok{background:#059669;border-color:#04684e}
+    select{padding:10px;border-radius:10px;border:1px solid #1f2937;background:#0b1120;color:#e5e7eb}
+    p#status{color:var(--muted);margin:8px 0 0 0}
 
-    .canvasWrap { position:relative; display:inline-block; max-width:100%; border-radius:12px; overflow:hidden; border:1px solid #1f2937; }
-    .canvasWrap canvas { display:block; width:100%; height:auto; background:#000; }
-    .handle {
-      position:absolute; width:22px; height:22px; border-radius:50%;
-      background:#fff; border:3px solid #2563eb; box-shadow:0 8px 20px rgba(0,0,0,.4);
-      transform: translate(-50%, -50%); touch-action:none;
-    }
+    .canvasWrap{position:relative;display:inline-block;max-width:100%;border-radius:12px;overflow:hidden;border:1px solid #1f2937}
+    .canvasWrap canvas{display:block;width:100%;height:auto;background:#000}
+    .handle{position:absolute;width:22px;height:22px;border-radius:50%;background:#fff;border:3px solid #2563eb;box-shadow:0 8px 20px rgba(0,0,0,.4);transform:translate(-50%,-50%);touch-action:none}
 
-    #warpPreview { width:100%; height:auto; display:block; background:#000; border:1px solid #1f2937; border-radius:12px; }
+    #warpPreview{width:100%;height:auto;display:block;background:#000;border:1px solid #1f2937;border-radius:12px}
+    .warn{margin-top:8px;padding:10px;border-radius:10px;background:#402e2e;border:1px solid #7f1d1d;color:#fecaca}
   </style>
 </head>
 <body>
@@ -66,14 +51,15 @@
       <div class="video-wrap" id="videoWrap" title="Zum Auslösen ins Bild tippen">
         <video id="video" playsinline autoplay muted></video>
         <div id="overlay"><div class="hline"></div><div class="vline"></div></div>
-        <div id="btnShutter" class="shutter"><span class="shutter-inner"></span></div>
+        <div class="shutter"><span class="shutter-inner"></span></div>
       </div>
       <div class="controls" style="margin-top:10px;">
         <button id="btnStart">Kamera Start</button>
         <select id="cameraSelect" title="Kamera wählen"></select>
         <button id="btnShoot">📸 Brett fotografieren</button>
       </div>
-      <p id="status">Tippe irgendwo ins Vorschaubild, um ein Foto zu machen.</p>
+      <p id="status">Tippe ins Vorschaubild, um auszulösen.</p>
+      <div id="diag" class="warn" style="display:none"></div>
     </div>
   </section>
 
@@ -118,6 +104,7 @@ const video = document.getElementById('video');
 const btnStart = document.getElementById('btnStart');
 const btnShoot = document.getElementById('btnShoot');
 const statusEl = document.getElementById('status');
+const diag = document.getElementById('diag');
 const cameraSelect = document.getElementById('cameraSelect');
 
 const photoCanvas = document.getElementById('photoCanvas');
@@ -140,13 +127,27 @@ let currentStream = null;
 let latestImage = null;
 let warpedImage = null;
 
-/* ===== Status Helper ===== */
+/* ===== Helpers ===== */
 const updateStatus = (msg, isErr=false)=>{
   statusEl.textContent = msg;
   statusEl.style.color = isErr ? '#f87171' : '#94a3b8';
 };
+const showDiag = (txt)=>{
+  diag.style.display = 'block';
+  diag.textContent = txt;
+};
 
-/* ===== Kamera ===== */
+/* Quick environment checks */
+(function quickChecks(){
+  if (location.protocol !== 'https:') {
+    showDiag('Hinweis: Die Seite läuft nicht über HTTPS – Browser blockieren dann die Kamera. Öffne die GitHub-Pages-URL mit https://');
+  }
+  if (window.top !== window.self) {
+    showDiag('Hinweis: Seite läuft in einem iFrame – viele Browser erlauben darin keinen Kamerazugriff.');
+  }
+})();
+
+/* ===== Kamera: Geräte auflisten ===== */
 async function listCameras(){
   try{
     const all = await navigator.mediaDevices.enumerateDevices();
@@ -159,28 +160,80 @@ async function listCameras(){
     });
     const env = devs.find(d=>/back|rear|environment/i.test(d.label));
     if(env) cameraSelect.value = env.deviceId;
-  }catch{}
-}
-async function startStream(deviceId){
-  if(!navigator.mediaDevices?.getUserMedia){ updateStatus('Kein Kamerazugriff möglich.', true); return; }
-  video.setAttribute('playsinline',''); video.muted=true;
-  if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); currentStream=null; }
-  const base={audio:false, video:{facingMode:{ideal:'environment'}}};
-  if(deviceId) base.video.deviceId={exact:deviceId};
-  const tries=[base,{audio:false,video:{facingMode:'environment'}},{audio:false,video:true}];
-  let lastErr=null;
-  for(const c of tries){
-    try{
-      const s=await navigator.mediaDevices.getUserMedia(c);
-      currentStream=s; video.srcObject=s; await video.play();
-      const st=s.getVideoTracks()[0].getSettings?.()||{};
-      updateStatus(`Kamera aktiv (${st.width||'?'}×${st.height||'?'}) – Tippe ins Bild zum Auslösen.`);
-      listCameras();
-      return;
-    }catch(e){ lastErr=e; }
+  }catch(e){
+    // still fine; permission might not be granted yet
   }
-  updateStatus('Kamera-Start fehlgeschlagen: '+(lastErr?.name||''), true);
 }
+
+/* ===== Kamera starten (robust + Diagnose) ===== */
+async function startStream(deviceId){
+  const msg = (t,e)=>updateStatus(t+(e?` [${e.name||''} ${e.message||''}]`:''), !!e);
+  try{
+    if(!navigator.mediaDevices?.getUserMedia){
+      msg('Browser unterstützt keinen Kamerazugriff.'); return;
+    }
+    video.setAttribute('playsinline',''); video.muted = true;
+
+    if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); currentStream=null; }
+
+    const base = { audio:false, video:{ facingMode:{ideal:'environment'} } };
+    if (deviceId) base.video.deviceId = { exact: deviceId };
+
+    const tries = [
+      base,
+      { audio:false, video:{ facingMode:'environment' } },
+      { audio:false, video:true }
+    ];
+    let lastErr=null;
+    for(const c of tries){
+      try{
+        const s = await navigator.mediaDevices.getUserMedia(c);
+        currentStream = s; video.srcObject = s;
+        try{ await video.play(); }catch{}
+        try{
+          const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
+          cameraSelect.innerHTML='';
+          devs.forEach((d,i)=>{ const o=document.createElement('option'); o.value=d.deviceId; o.textContent=d.label||`Kamera ${i+1}`; cameraSelect.appendChild(o); });
+          const st=s.getVideoTracks()[0].getSettings?.()||{};
+          if(st.deviceId) cameraSelect.value = st.deviceId;
+        }catch{}
+        const st = s.getVideoTracks()[0].getSettings?.()||{};
+        msg(`Kamera aktiv (${st.width||'?'}×${st.height||'?'}) – Tippe ins Bild zum Auslösen.`);
+        return;
+      }catch(e){ lastErr = e; }
+    }
+    if(lastErr){
+      if(lastErr.name==='NotAllowedError'){
+        msg('Kamerazugriff verweigert. Erlaube die Kamera in den Website-Berechtigungen & lade neu.', lastErr);
+        showDiag('iOS Safari: aA ▸ Website-Einstellungen ▸ Kamera ▸ „Zulassen“. Android Chrome: Schloss-Symbol ▸ Berechtigungen ▸ Kamera ▸ „Zulassen“.');
+      }else if(lastErr.name==='NotFoundError'){
+        msg('Keine Kamera gefunden.', lastErr);
+      }else if(lastErr.name==='OverconstrainedError'){
+        msg('Kamera unterstützt die Parameter nicht.', lastErr);
+      }else{
+        msg('Kamera konnte nicht gestartet werden.', lastErr);
+      }
+    }
+  }catch(e){
+    updateStatus('Fehler beim Start: '+(e.message||e), true);
+  }
+}
+
+/* Auto-Start wenn schon erlaubt (unterstützte Browser) */
+(async function autoStartIfGranted(){
+  try{
+    if (navigator.permissions && navigator.permissions.query) {
+      const p = await navigator.permissions.query({ name: 'camera' });
+      if (p.state === 'granted') {
+        updateStatus('Kamerazugriff ist bereits erlaubt – starte…');
+        startStream();
+      }
+      p.onchange = ()=>{ if(p.state==='granted' && !currentStream) startStream(); };
+    }
+  }catch{}
+})();
+
+/* Sichtbarkeitswechsel – Video wieder anwerfen */
 document.addEventListener('visibilitychange', async ()=>{
   if(!document.hidden && currentStream && video.paused){ try{ await video.play(); }catch{} }
 });
@@ -192,7 +245,7 @@ function takeShot(){
   const side=Math.min(vw,vh);
   const sx=Math.floor((vw-side)/2), sy=Math.floor((vh-side)/2);
   photoCanvas.width=side; photoCanvas.height=side;
-  ctxPhoto.drawImage(video,sx,sy,side,side,0,0,side,side);
+  ctxPhoto.drawImage(video, sx,sy,side,side, 0,0,side,side);
   latestImage=new Image(); latestImage.onload=()=> placeDefaultHandles();
   latestImage.src=photoCanvas.toDataURL('image/jpeg',0.95);
   updateStatus('Foto aufgenommen. Ecken ggf. anpassen.');
@@ -206,9 +259,9 @@ async function shootOnce(e){
 }
 video.addEventListener('pointerup', shootOnce, {passive:false});
 video.addEventListener('click',     shootOnce, {passive:false});
-btnShoot.addEventListener('click', shootOnce);
+btnShoot.addEventListener('click',  shootOnce);
 
-/* ===== Handles ===== */
+/* ===== Griffe ===== */
 function setHandle(i, xPx, yPx){
   handles[i].style.left = (xPx / photoCanvas.width * 100) + '%';
   handles[i].style.top  = (yPx / photoCanvas.height * 100) + '%';
@@ -242,7 +295,7 @@ handles.forEach(h=>{
   window.addEventListener('touchend', ()=>dragging=false);
 });
 
-/* ===== Auto-Ecken ===== */
+/* ===== Auto-Ecken (Pro) ===== */
 function orderQuad(pts){ pts.sort((a,b)=>a.y-b.y); const top=pts.slice(0,2).sort((a,b)=>a.x-b.x); const bot=pts.slice(2).sort((a,b)=>a.x-b.x); return [top[0],top[1],bot[1],bot[0]]; }
 function scoreRect(quad){
   if(!quad||quad.length!==4) return -1;
@@ -286,4 +339,93 @@ function autoCornersHough(){
     if(ang<20||ang>160) horizontal.push([x1,y1,x2,y2]);
     else if(Math.abs(ang-90)<20) vertical.push([x1,y1,x2,y2]);
   }
-  const pick=(arr,fn
+  const pick=(arr,fn)=>arr.reduce((a,b)=> fn(a,b)?b:a, arr[0]);
+  const left  = vertical.length?  pick(vertical,(a,b)=>Math.min(b[0],b[2])<Math.min(a[0],a[2])) : null;
+  const right = vertical.length?  pick(vertical,(a,b)=>Math.max(b[0],b[2])>Math.max(a[0],a[2])) : null;
+  const top   = horizontal.length? pick(horizontal,(a,b)=>Math.min(b[1],b[3])<Math.min(a[1],a[3])) : null;
+  const bottom= horizontal.length? pick(horizontal,(a,b)=>Math.max(b[1],b[3])>Math.max(a[1],a[3])) : null;
+  const inter=(l1,l2)=>{ if(!l1||!l2) return null; const [x1,y1,x2,y2]=l1,[x3,y3,x4,y4]=l2;
+    const den=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4); if(!den) return null;
+    const px=((x1*y2-y1*x2)*(x3-x4)-(x1-x2)*(x3*y4-y3*x4))/den;
+    const py=((x1*y2-y1*x2)*(y3-y4)-(y1-y2)*(x3*y4-y3*x4))/den; return {x:px,y:py}; };
+  let quad=null;
+  if(left&&right&&top&&bottom){
+    quad=orderQuad([inter(top,left),inter(top,right),inter(bottom,right),inter(bottom,left)].filter(Boolean));
+  }
+  src.delete(); gray.delete(); edges.delete(); lines.delete();
+  return quad;
+}
+function autoFindCornersPro(){
+  try{
+    const q1 = autoCornersContour();
+    const q2 = autoCornersHough();
+    const s1 = scoreRect(q1), s2 = scoreRect(q2);
+    const best = s1>=s2 ? q1 : q2;
+    if(best){
+      best.forEach((p,i)=> setHandle(i,p.x,p.y));
+      updateStatus(`Ecken automatisch gesetzt (Pro). Score ${(Math.max(s1,s2)).toFixed(2)} — prüfen.`);
+    } else {
+      updateStatus('Automatik fand keine stabilen Brettkanten. Bitte manuell setzen und „Snap 90°“ nutzen.', true);
+    }
+  }catch(e){ updateStatus('OpenCV lädt noch? Versuche gleich erneut.', true); }
+}
+
+/* ===== Snap 90° ===== */
+function snapToOrthogonal(){
+  const pts=getHandlePoints();
+  const cx=(pts[0].x+pts[1].x+pts[2].x+pts[3].x)/4, cy=(pts[0].y+pts[1].y+pts[2].y+pts[3].y)/4;
+  const w=(Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y) + Math.hypot(pts[2].x-pts[3].x, pts[2].y-pts[3].y))/2;
+  const h=(Math.hypot(pts[3].x-pts[0].x, pts[3].y-pts[0].y) + Math.hypot(pts[2].x-pts[1].x, pts[2].y-pts[1].y))/2;
+  const halfW=w/2, halfH=h/2;
+  [{x:cx-halfW,y:cy-halfH},{x:cx+halfW,y:cy-halfH},{x:cx+halfW,y:cy+halfH},{x:cx-halfW,y:cy+halfH}]
+    .forEach((p,i)=> setHandle(i,p.x,p.y));
+  updateStatus('Auf 90° eingerastet.');
+}
+
+/* ===== Entzerren + Gitternetz ===== */
+function drawGrid(){
+  if(!toggleGrid.checked) return;
+  const s=warpPreview.width;
+  ctxPreview.save(); ctxPreview.strokeStyle='rgba(255,255,255,.5)'; ctxPreview.lineWidth=1;
+  for(let i=1;i<8;i++){ const x=Math.round((s/8)*i);
+    ctxPreview.beginPath(); ctxPreview.moveTo(x,0); ctxPreview.lineTo(x,s); ctxPreview.stroke();
+    ctxPreview.beginPath(); ctxPreview.moveTo(0,x); ctxPreview.lineTo(s,x); ctxPreview.stroke();
+  }
+  ctxPreview.restore();
+}
+function warpBoard(){
+  if(!photoCanvas.width){ updateStatus('Kein Bild vorhanden.', true); return; }
+  try{
+    const pts=getHandlePoints(); const dest=800;
+    const srcMat=cv.imread(photoCanvas);
+    const srcTri=cv.matFromArray(4,1,cv.CV_32FC2,new Float32Array([pts[0].x,pts[0].y,pts[1].x,pts[1].y,pts[2].x,pts[2].y,pts[3].x,pts[3].y]));
+    const dstTri=cv.matFromArray(4,1,cv.CV_32FC2,new Float32Array([0,0,dest,0,dest,dest,0,dest]));
+    const M=cv.getPerspectiveTransform(srcTri,dstTri);
+    let dst=new cv.Mat(); cv.warpPerspective(srcMat,dst,M,new cv.Size(dest,dest),cv.INTER_LINEAR,cv.BORDER_REPLICATE);
+
+    warpPreview.width=dest; warpPreview.height=dest;
+    const tmp=document.createElement('canvas'); tmp.width=dest; tmp.height=dest; cv.imshow(tmp,dst);
+    ctxPreview.clearRect(0,0,dest,dest); ctxPreview.drawImage(tmp,0,0); drawGrid();
+    warpedImage=tmp;
+
+    srcMat.delete(); srcTri.delete(); dstTri.delete(); M.delete(); dst.delete();
+    updateStatus('Brett entzerrt. Gitternetz prüfen.');
+  }catch(e){ updateStatus('Entzerren fehlgeschlagen: '+e, true); }
+}
+
+/* ===== Events & Init ===== */
+btnStart.addEventListener('click', ()=> startStream(cameraSelect.value||undefined));
+cameraSelect.addEventListener('change', ()=> startStream(cameraSelect.value));
+
+btnAutoPro.addEventListener('click', autoFindCornersPro);
+btnSnapRect.addEventListener('click', snapToOrthogonal);
+
+btnWarp.addEventListener('click', warpBoard);
+btnResetCorners.addEventListener('click', ()=>{ if(latestImage){ ctxPhoto.drawImage(latestImage,0,0); placeDefaultHandles(); } });
+btnRotL.addEventListener('click', ()=> rotatePhoto(-90));
+btnRotR.addEventListener('click', ()=> rotatePhoto(90));
+
+if ('mediaDevices' in navigator){ listCameras(); }
+</script>
+</body>
+</html>
