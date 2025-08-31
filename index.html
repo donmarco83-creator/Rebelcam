@@ -3,17 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>Schachbrett fotografieren & entzerren</title>
+  <title>Schachbrett → FEN → Lichess</title>
   <style>
-    :root { --bg:#0b1020; --text:#e5e7eb; --muted:#94a3b8; }
+    :root { --bg:#0b1020; --text:#e5e7eb; --muted:#94a3b8; --panel:#0b1120; --border:#1f2937; }
     *{box-sizing:border-box}
     body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#0b1020;color:var(--text)}
     header{padding:12px 14px;background:#111827;font-weight:700}
-    main{padding:12px;max-width:900px;margin:0 auto 60px}
-    .card{background:#0b1120;border:1px solid #1f2937;border-radius:14px;overflow:hidden}
-    .hd{padding:10px 12px;border-bottom:1px solid #1f2937;font-weight:700;background:#0d1428}
+    main{padding:12px;max-width:980px;margin:0 auto 80px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+    .hd{padding:10px 12px;border-bottom:1px solid var(--border);font-weight:700;background:#0d1428}
     .bd{padding:12px}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    .grow{flex:1 1 300px}
 
+    /* Kamera-Preview */
     .video-wrap{position:relative;aspect-ratio:1/1;border-radius:12px;overflow:hidden;background:#000;cursor:pointer}
     video{width:100%;height:100%;display:block;object-fit:cover;background:#000}
     #overlay{position:absolute;inset:0;pointer-events:none;border:2px dashed rgba(255,255,255,.25)}
@@ -21,48 +24,69 @@
     #overlay .hline{left:0;right:0;height:1px;top:50%}
     #overlay .vline{top:0;bottom:0;width:1px;left:50%}
 
-    /* Ring nur Optik – blockiert keine Klicks */
+    /* Weißer Ring nur Optik */
     .shutter{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:72px;height:72px;border-radius:50%;
       background:transparent;border:none;padding:0;display:grid;place-items:center;pointer-events:none}
     .shutter-inner{width:72px;height:72px;border-radius:50%;border:5px solid rgba(255,255,255,.95);box-shadow:0 6px 24px rgba(0,0,0,.45);background:transparent;pointer-events:none}
 
     .controls{display:flex;gap:8px;flex-wrap:wrap}
-    button{padding:10px 12px;border-radius:10px;border:1px solid #1f2937;background:#1e3a8a;color:#fff;cursor:pointer}
+    button{padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#1e3a8a;color:#fff;cursor:pointer}
     button.ghost{background:#374151}
     button.ok{background:#059669;border-color:#04684e}
-    select{padding:10px;border-radius:10px;border:1px solid #1f2937;background:#0b1120;color:#e5e7eb}
+    select,input[type="range"]{padding:10px;border-radius:10px;border:1px solid var(--border);background:#0b1120;color:#e5e7eb}
+    label.slider{display:flex;align-items:center;gap:10px}
     p#status{color:var(--muted);margin:8px 0 0 0}
+    .warn{margin-top:8px;padding:10px;border-radius:10px;background:#402e2e;border:1px solid #7f1d1d;color:#fecaca;display:none}
 
-    .canvasWrap{position:relative;display:inline-block;max-width:100%;border-radius:12px;overflow:hidden;border:1px solid #1f2937}
+    /* Foto & Griffpunkte */
+    .canvasWrap{position:relative;display:inline-block;max-width:100%;border-radius:12px;overflow:hidden;border:1px solid var(--border)}
     .canvasWrap canvas{display:block;width:100%;height:auto;background:#000}
-    .handle{position:absolute;width:22px;height:22px;border-radius:50%;background:#fff;border:3px solid #2563eb;box-shadow:0 8px 20px rgba(0,0,0,.4);transform:translate(-50%,-50%);touch-action:none}
+    .handle{position:absolute;width:22px;height:22px;border-radius:50%;background:#fff;border:3px solid #2563eb;box-shadow:0 8px 20px rgba(0,0,0,.4);
+      transform:translate(-50%,-50%);touch-action:none}
 
-    #warpPreview{width:100%;height:auto;display:block;background:#000;border:1px solid #1f2937;border-radius:12px}
-    .warn{margin-top:8px;padding:10px;border-radius:10px;background:#402e2e;border:1px solid #7f1d1d;color:#fecaca}
+    /* Warp+Overlay (Erkennung) */
+    .previewStack{position:relative;max-width:820px;margin:auto}
+    #warpPreview{width:100%;height:auto;display:block;background:#000;border:1px solid var(--border);border-radius:12px}
+    #anno{position:absolute;inset:0;pointer-events:auto}
+
+    /* Palette */
+    .palette{display:flex;flex-wrap:wrap;gap:6px}
+    .pieceBtn{font-size:20px;line-height:1;padding:10px 12px;border-radius:10px;border:1px solid var(--border);background:#0f172a;color:#fff;cursor:pointer}
+    .pieceBtn.active{outline:2px solid #60a5fa}
+    .small{font-size:14px}
+
+    .util{display:flex;flex-wrap:wrap;gap:8px}
+    .util a{color:#93c5fd}
   </style>
 </head>
 <body>
-<header>♟️ Kamera → Brett entzerren (quadratisch)</header>
+<header>♟️ Schachbrett → FEN → Lichess (Kamera & Analyse)</header>
 <main>
 
+  <!-- 1) Foto aufnehmen -->
   <section class="card">
     <div class="hd">1) Foto aufnehmen</div>
     <div class="bd">
-      <div class="video-wrap" id="videoWrap" title="Zum Auslösen ins Bild tippen">
-        <video id="video" playsinline autoplay muted></video>
-        <div id="overlay"><div class="hline"></div><div class="vline"></div></div>
-        <div class="shutter"><span class="shutter-inner"></span></div>
+      <div class="row">
+        <div class="grow">
+          <div class="video-wrap" id="videoWrap" title="Zum Auslösen ins Bild tippen">
+            <video id="video" playsinline autoplay muted></video>
+            <div id="overlay"><div class="hline"></div><div class="vline"></div></div>
+            <div class="shutter"><span class="shutter-inner"></span></div>
+          </div>
+          <div class="controls" style="margin-top:10px;">
+            <button id="btnStart">Kamera Start</button>
+            <select id="cameraSelect" title="Kamera wählen"></select>
+            <button id="btnShoot">📸 Brett fotografieren</button>
+          </div>
+          <p id="status">Tippe ins Vorschaubild, um ein Foto zu machen.</p>
+          <div id="diag" class="warn"></div>
+        </div>
       </div>
-      <div class="controls" style="margin-top:10px;">
-        <button id="btnStart">Kamera Start</button>
-        <select id="cameraSelect" title="Kamera wählen"></select>
-        <button id="btnShoot">📸 Brett fotografieren</button>
-      </div>
-      <p id="status">Tippe ins Vorschaubild, um auszulösen.</p>
-      <div id="diag" class="warn" style="display:none"></div>
     </div>
   </section>
 
+  <!-- 2) Ecken setzen -->
   <section class="card" style="margin-top:12px;">
     <div class="hd">2) Ecken setzen & entzerren</div>
     <div class="bd">
@@ -84,13 +108,65 @@
     </div>
   </section>
 
+  <!-- 3) Warp-Vorschau + Regler -->
   <section class="card" style="margin-top:12px;">
-    <div class="hd">3) Warp-Vorschau (mit Gitternetz)</div>
+    <div class="hd">3) Warp-Vorschau (mit Gitternetz & Reglern)</div>
     <div class="bd">
-      <label style="display:inline-flex;align-items:center;gap:8px;margin-bottom:8px;">
-        <input type="checkbox" id="toggleGrid" checked> Gitternetz anzeigen
-      </label>
-      <canvas id="warpPreview" width="800" height="800"></canvas>
+      <div class="controls" style="margin-bottom:10px">
+        <label class="slider">Helligkeit <input id="rngBright" type="range" min="-50" max="50" value="0" step="1"><span id="lblBright">0</span></label>
+        <label class="slider">Kontrast <input id="rngContrast" type="range" min="-50" max="50" value="0" step="1"><span id="lblContrast">0</span></label>
+        <button id="btnAutoOrient" class="ghost">Auto drehen: Weiß unten rechts</button>
+        <label style="display:inline-flex;align-items:center;gap:8px;margin-left:auto;">
+          <input type="checkbox" id="toggleGrid" checked> Gitternetz
+        </label>
+      </div>
+      <div class="previewStack">
+        <canvas id="warpPreview" width="800" height="800"></canvas>
+        <canvas id="anno" width="800" height="800"></canvas>
+      </div>
+      <div class="util" style="margin-top:10px;">
+        <button id="btnRetake" class="ghost">🔁 Neu aufnehmen</button>
+        <button id="btnSaveImage" class="ghost">💾 Bild speichern</button>
+        <button id="btnShareImage" class="ghost">📤 Teilen</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4) FEN-Erkennung & Lichess -->
+  <section class="card" style="margin-top:12px;">
+    <div class="hd">4) Erkennung → FEN → Lichess</div>
+    <div class="bd">
+      <div class="controls" style="margin-bottom:10px;">
+        <button id="btnDetect" class="ok">🔎 Stellung erkennen</button>
+        <button id="btnResetPred" class="ghost">⟲ Erkennung übernehmen</button>
+        <button id="btnClear" class="ghost">␡ Brett leeren</button>
+        <button id="btnCopyFEN">📋 FEN kopieren</button>
+        <button id="btnLichess">♟️ In Lichess öffnen</button>
+      </div>
+
+      <div class="palette" id="palette">
+        <div class="pieceBtn small" data-piece="">␡ Leer</div>
+        <div class="pieceBtn" data-piece="P">♙</div>
+        <div class="pieceBtn" data-piece="N">♘</div>
+        <div class="pieceBtn" data-piece="B">♗</div>
+        <div class="pieceBtn" data-piece="R">♖</div>
+        <div class="pieceBtn" data-piece="Q">♕</div>
+        <div class="pieceBtn" data-piece="K">♔</div>
+        <div class="pieceBtn" data-piece="p">♟</div>
+        <div class="pieceBtn" data-piece="n">♞</div>
+        <div class="pieceBtn" data-piece="b">♝</div>
+        <div class="pieceBtn" data-piece="r">♜</div>
+        <div class="pieceBtn" data-piece="q">♛</div>
+        <div class="pieceBtn" data-piece="k">♚</div>
+      </div>
+      <p style="color:#9ca3af;margin-top:8px">Tipp auf ein Feld setzt die aktuell gewählte Figur. Doppeltipp entleert ein Feld.</p>
+
+      <div class="row" style="margin-top:10px;">
+        <div class="grow">
+          <label>Erkanntes FEN</label>
+          <input id="fenOut" type="text" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--border);background:#0b1120;color:#e5e7eb" readonly />
+        </div>
+      </div>
     </div>
   </section>
 
@@ -99,7 +175,7 @@
 <!-- OpenCV -->
 <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
 <script>
-/* ===== DOM ===== */
+/* ====== DOM ====== */
 const video = document.getElementById('video');
 const btnStart = document.getElementById('btnStart');
 const btnShoot = document.getElementById('btnShoot');
@@ -120,34 +196,45 @@ const btnSnapRect = document.getElementById('btnSnapRect');
 
 const warpPreview = document.getElementById('warpPreview');
 const ctxPreview = warpPreview.getContext('2d');
+const anno = document.getElementById('anno');
+const ctxAnno = anno.getContext('2d');
+
+const rngBright = document.getElementById('rngBright');
+const rngContrast = document.getElementById('rngContrast');
+const lblBright = document.getElementById('lblBright');
+const lblContrast = document.getElementById('lblContrast');
+const btnAutoOrient = document.getElementById('btnAutoOrient');
 const toggleGrid = document.getElementById('toggleGrid');
+
+const btnDetect = document.getElementById('btnDetect');
+const btnResetPred = document.getElementById('btnResetPred');
+const btnClear = document.getElementById('btnClear');
+const btnCopyFEN = document.getElementById('btnCopyFEN');
+const btnLichess = document.getElementById('btnLichess');
+const fenOut = document.getElementById('fenOut');
+
+const btnRetake = document.getElementById('btnRetake');
+const btnSaveImage = document.getElementById('btnSaveImage');
+const btnShareImage = document.getElementById('btnShareImage');
+
+const palette = document.getElementById('palette');
+let currentTool = ''; // '', P,N,B,R,Q,K or lowercase
 
 /* ===== State ===== */
 let currentStream = null;
-let latestImage = null;
-let warpedImage = null;
+let latestImage = null;   // aufgenommenes Foto
+let warpedImage = null;   // entzerrtes Canvas (Canvas-Element)
+let predictedBoard = Array.from({length:8}, ()=>Array(8).fill(''));
+let board = Array.from({length:8}, ()=>Array(8).fill(''));
 
 /* ===== Helpers ===== */
 const updateStatus = (msg, isErr=false)=>{
   statusEl.textContent = msg;
   statusEl.style.color = isErr ? '#f87171' : '#94a3b8';
 };
-const showDiag = (txt)=>{
-  diag.style.display = 'block';
-  diag.textContent = txt;
-};
+const showDiag = (txt)=>{ diag.style.display='block'; diag.textContent=txt; };
 
-/* Quick environment checks */
-(function quickChecks(){
-  if (location.protocol !== 'https:') {
-    showDiag('Hinweis: Die Seite läuft nicht über HTTPS – Browser blockieren dann die Kamera. Öffne die GitHub-Pages-URL mit https://');
-  }
-  if (window.top !== window.self) {
-    showDiag('Hinweis: Seite läuft in einem iFrame – viele Browser erlauben darin keinen Kamerazugriff.');
-  }
-})();
-
-/* ===== Kamera: Geräte auflisten ===== */
+/* ===== Kamera ===== */
 async function listCameras(){
   try{
     const all = await navigator.mediaDevices.enumerateDevices();
@@ -160,85 +247,36 @@ async function listCameras(){
     });
     const env = devs.find(d=>/back|rear|environment/i.test(d.label));
     if(env) cameraSelect.value = env.deviceId;
-  }catch(e){
-    // still fine; permission might not be granted yet
-  }
+  }catch{}
 }
-
-/* ===== Kamera starten (robust + Diagnose) ===== */
 async function startStream(deviceId){
   const msg = (t,e)=>updateStatus(t+(e?` [${e.name||''} ${e.message||''}]`:''), !!e);
   try{
-    if(!navigator.mediaDevices?.getUserMedia){
-      msg('Browser unterstützt keinen Kamerazugriff.'); return;
-    }
-    video.setAttribute('playsinline',''); video.muted = true;
-
+    if(!navigator.mediaDevices?.getUserMedia){ msg('Browser unterstützt keinen Kamerazugriff.'); return; }
+    video.setAttribute('playsinline',''); video.muted=true;
     if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); currentStream=null; }
-
-    const base = { audio:false, video:{ facingMode:{ideal:'environment'} } };
-    if (deviceId) base.video.deviceId = { exact: deviceId };
-
-    const tries = [
-      base,
-      { audio:false, video:{ facingMode:'environment' } },
-      { audio:false, video:true }
-    ];
+    const base={audio:false,video:{facingMode:{ideal:'environment'}}};
+    if(deviceId) base.video.deviceId={exact:deviceId};
+    const tries=[ base, {audio:false,video:{facingMode:'environment'}}, {audio:false,video:true} ];
     let lastErr=null;
     for(const c of tries){
       try{
-        const s = await navigator.mediaDevices.getUserMedia(c);
-        currentStream = s; video.srcObject = s;
-        try{ await video.play(); }catch{}
-        try{
-          const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='videoinput');
-          cameraSelect.innerHTML='';
-          devs.forEach((d,i)=>{ const o=document.createElement('option'); o.value=d.deviceId; o.textContent=d.label||`Kamera ${i+1}`; cameraSelect.appendChild(o); });
-          const st=s.getVideoTracks()[0].getSettings?.()||{};
-          if(st.deviceId) cameraSelect.value = st.deviceId;
-        }catch{}
-        const st = s.getVideoTracks()[0].getSettings?.()||{};
+        const s=await navigator.mediaDevices.getUserMedia(c);
+        currentStream=s; video.srcObject=s; await video.play();
+        const st=s.getVideoTracks()[0].getSettings?.()||{};
         msg(`Kamera aktiv (${st.width||'?'}×${st.height||'?'}) – Tippe ins Bild zum Auslösen.`);
+        listCameras();
         return;
-      }catch(e){ lastErr = e; }
+      }catch(e){ lastErr=e; }
     }
-    if(lastErr){
-      if(lastErr.name==='NotAllowedError'){
-        msg('Kamerazugriff verweigert. Erlaube die Kamera in den Website-Berechtigungen & lade neu.', lastErr);
-        showDiag('iOS Safari: aA ▸ Website-Einstellungen ▸ Kamera ▸ „Zulassen“. Android Chrome: Schloss-Symbol ▸ Berechtigungen ▸ Kamera ▸ „Zulassen“.');
-      }else if(lastErr.name==='NotFoundError'){
-        msg('Keine Kamera gefunden.', lastErr);
-      }else if(lastErr.name==='OverconstrainedError'){
-        msg('Kamera unterstützt die Parameter nicht.', lastErr);
-      }else{
-        msg('Kamera konnte nicht gestartet werden.', lastErr);
-      }
-    }
-  }catch(e){
-    updateStatus('Fehler beim Start: '+(e.message||e), true);
-  }
+    msg('Kamera-Start fehlgeschlagen.', lastErr);
+  }catch(e){ updateStatus('Fehler beim Start: '+(e.message||e), true); }
 }
-
-/* Auto-Start wenn schon erlaubt (unterstützte Browser) */
-(async function autoStartIfGranted(){
-  try{
-    if (navigator.permissions && navigator.permissions.query) {
-      const p = await navigator.permissions.query({ name: 'camera' });
-      if (p.state === 'granted') {
-        updateStatus('Kamerazugriff ist bereits erlaubt – starte…');
-        startStream();
-      }
-      p.onchange = ()=>{ if(p.state==='granted' && !currentStream) startStream(); };
-    }
-  }catch{}
-})();
-
-/* Sichtbarkeitswechsel – Video wieder anwerfen */
 document.addEventListener('visibilitychange', async ()=>{
   if(!document.hidden && currentStream && video.paused){ try{ await video.play(); }catch{} }
 });
 
-/* ===== Foto ===== */
+/* ===== Foto aufnehmen (Tap-to-Shoot überall) ===== */
 function takeShot(){
   if(!video.videoWidth){ updateStatus('Video noch nicht bereit.', true); return; }
   const vw=video.videoWidth, vh=video.videoHeight;
@@ -246,9 +284,10 @@ function takeShot(){
   const sx=Math.floor((vw-side)/2), sy=Math.floor((vh-side)/2);
   photoCanvas.width=side; photoCanvas.height=side;
   ctxPhoto.drawImage(video, sx,sy,side,side, 0,0,side,side);
-  latestImage=new Image(); latestImage.onload=()=> placeDefaultHandles();
+  latestImage=new Image();
+  latestImage.onload=()=> placeDefaultHandles();
   latestImage.src=photoCanvas.toDataURL('image/jpeg',0.95);
-  updateStatus('Foto aufgenommen. Ecken ggf. anpassen.');
+  updateStatus('Foto aufgenommen. Setze die vier Ecken exakt auf die Brett-Außenkanten.');
 }
 function isUIEvent(e){ return !!(e.target.closest('button,select,label,input')); }
 let shooting=false;
@@ -261,11 +300,8 @@ video.addEventListener('pointerup', shootOnce, {passive:false});
 video.addEventListener('click',     shootOnce, {passive:false});
 btnShoot.addEventListener('click',  shootOnce);
 
-/* ===== Griffe ===== */
-function setHandle(i, xPx, yPx){
-  handles[i].style.left = (xPx / photoCanvas.width * 100) + '%';
-  handles[i].style.top  = (yPx / photoCanvas.height * 100) + '%';
-}
+/* ===== Griffe / Ecken ===== */
+function setHandle(i, xPx, yPx){ handles[i].style.left=(xPx/photoCanvas.width*100)+'%'; handles[i].style.top=(yPx/photoCanvas.height*100)+'%'; }
 function placeDefaultHandles(){
   setHandle(0,10,10);
   setHandle(1,photoCanvas.width-10,10);
@@ -275,22 +311,22 @@ function placeDefaultHandles(){
 function getHandlePoints(){
   return handles.map(h=>{
     const xPct=parseFloat(h.style.left)||0, yPct=parseFloat(h.style.top)||0;
-    return { x:xPct/100 * photoCanvas.width, y:yPct/100 * photoCanvas.height };
+    return { x:xPct/100*photoCanvas.width, y:yPct/100*photoCanvas.height };
   });
 }
 handles.forEach(h=>{
   let dragging=false;
   const move=(clientX,clientY)=>{
-    const r = photoCanvas.getBoundingClientRect();
-    const x = Math.max(0,Math.min(r.width,clientX-r.left));
-    const y = Math.max(0,Math.min(r.height,clientY-r.top));
+    const r=photoCanvas.getBoundingClientRect();
+    const x=Math.max(0,Math.min(r.width,clientX-r.left));
+    const y=Math.max(0,Math.min(r.height,clientY-r.top));
     h.style.left=(x/r.width*100)+'%';
     h.style.top =(y/r.height*100)+'%';
   };
-  h.addEventListener('mousedown', e=>{dragging=true; e.preventDefault();});
+  h.addEventListener('mousedown', e=>{dragging=true;e.preventDefault();});
   window.addEventListener('mousemove', e=>{ if(dragging) move(e.clientX,e.clientY); });
   window.addEventListener('mouseup', ()=>dragging=false);
-  h.addEventListener('touchstart', e=>{dragging=true; e.preventDefault();},{passive:false});
+  h.addEventListener('touchstart', e=>{dragging=true;e.preventDefault();},{passive:false});
   window.addEventListener('touchmove', e=>{ if(!dragging) return; const t=e.touches[0]; move(t.clientX,t.clientY);},{passive:false});
   window.addEventListener('touchend', ()=>dragging=false);
 });
@@ -299,11 +335,11 @@ handles.forEach(h=>{
 function orderQuad(pts){ pts.sort((a,b)=>a.y-b.y); const top=pts.slice(0,2).sort((a,b)=>a.x-b.x); const bot=pts.slice(2).sort((a,b)=>a.x-b.x); return [top[0],top[1],bot[1],bot[0]]; }
 function scoreRect(quad){
   if(!quad||quad.length!==4) return -1;
-  const area=Math.abs(quad[0].x*quad[1].y-quad[1].x*quad[0].y+quad[1].x*quad[2].y-quad[2].x*quad[1].y+quad[2].x*quad[3].y-quad[3].x*quad[2].y+quad[3].x*quad[0].y-quad[0].x*quad[3].y)/2;
+  const area=Math.abs( quad[0].x*quad[1].y-quad[1].x*quad[0].y + quad[1].x*quad[2].y-quad[2].x*quad[1].y + quad[2].x*quad[3].y-quad[3].x*quad[2].y + quad[3].x*quad[0].y-quad[0].x*quad[3].y )/2;
   const W=photoCanvas.width,H=photoCanvas.height;
-  const areaScore=Math.min(1,area/(W*H*0.6));
+  const areaScore=Math.min(1, area/(W*H*0.6));
   const ang=(p,q,r)=>{const ux=p.x-q.x,uy=p.y-q.y,vx=r.x-q.x,vy=r.y-q.y; const d=(ux*vx+uy*vy)/Math.max(1e-6,Math.hypot(ux,uy)*Math.hypot(vx,vy)); return Math.acos(Math.max(-1,Math.min(1,d)));};
-  const A=[ang(quad[3],quad[0],quad[1]),ang(quad[0],quad[1],quad[2]),ang(quad[1],quad[2],quad[3]),ang(quad[2],quad[3],quad[0])];
+  const A=[ ang(quad[3],quad[0],quad[1]), ang(quad[0],quad[1],quad[2]), ang(quad[1],quad[2],quad[3]), ang(quad[2],quad[3],quad[0]) ];
   const rightness=1-(A.reduce((s,a)=>s+Math.abs(Math.PI/2-a),0)/(4*(Math.PI/2)));
   return 0.5*areaScore+0.5*rightness;
 }
@@ -340,10 +376,10 @@ function autoCornersHough(){
     else if(Math.abs(ang-90)<20) vertical.push([x1,y1,x2,y2]);
   }
   const pick=(arr,fn)=>arr.reduce((a,b)=> fn(a,b)?b:a, arr[0]);
-  const left  = vertical.length?  pick(vertical,(a,b)=>Math.min(b[0],b[2])<Math.min(a[0],a[2])) : null;
-  const right = vertical.length?  pick(vertical,(a,b)=>Math.max(b[0],b[2])>Math.max(a[0],a[2])) : null;
-  const top   = horizontal.length? pick(horizontal,(a,b)=>Math.min(b[1],b[3])<Math.min(a[1],a[3])) : null;
-  const bottom= horizontal.length? pick(horizontal,(a,b)=>Math.max(b[1],b[3])>Math.max(a[1],a[3])) : null;
+  const left=vertical.length? pick(vertical,(a,b)=>Math.min(b[0],b[2])<Math.min(a[0],a[2])):null;
+  const right=vertical.length? pick(vertical,(a,b)=>Math.max(b[0],b[2])>Math.max(a[0],a[2])):null;
+  const top=horizontal.length? pick(horizontal,(a,b)=>Math.min(b[1],b[3])<Math.min(a[1],a[3])):null;
+  const bottom=horizontal.length? pick(horizontal,(a,b)=>Math.max(b[1],b[3])>Math.max(a[1],a[3])):null;
   const inter=(l1,l2)=>{ if(!l1||!l2) return null; const [x1,y1,x2,y2]=l1,[x3,y3,x4,y4]=l2;
     const den=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4); if(!den) return null;
     const px=((x1*y2-y1*x2)*(x3-x4)-(x1-x2)*(x3*y4-y3*x4))/den;
@@ -357,29 +393,32 @@ function autoCornersHough(){
 }
 function autoFindCornersPro(){
   try{
-    const q1 = autoCornersContour();
-    const q2 = autoCornersHough();
-    const s1 = scoreRect(q1), s2 = scoreRect(q2);
-    const best = s1>=s2 ? q1 : q2;
-    if(best){
-      best.forEach((p,i)=> setHandle(i,p.x,p.y));
-      updateStatus(`Ecken automatisch gesetzt (Pro). Score ${(Math.max(s1,s2)).toFixed(2)} — prüfen.`);
-    } else {
-      updateStatus('Automatik fand keine stabilen Brettkanten. Bitte manuell setzen und „Snap 90°“ nutzen.', true);
-    }
+    const q1=autoCornersContour();
+    const q2=autoCornersHough();
+    const s1=scoreRect(q1), s2=scoreRect(q2);
+    const best=s1>=s2 ? q1 : q2;
+    if(best){ best.forEach((p,i)=> setHandle(i,p.x,p.y)); updateStatus(`Ecken automatisch gesetzt (Score ${(Math.max(s1,s2)).toFixed(2)}).`); }
+    else { updateStatus('Automatik fand keine stabilen Kanten. Bitte manuell setzen und „Snap 90°“ nutzen.', true); }
   }catch(e){ updateStatus('OpenCV lädt noch? Versuche gleich erneut.', true); }
 }
 
-/* ===== Snap 90° ===== */
+/* ===== Snap & Rotation ===== */
 function snapToOrthogonal(){
   const pts=getHandlePoints();
   const cx=(pts[0].x+pts[1].x+pts[2].x+pts[3].x)/4, cy=(pts[0].y+pts[1].y+pts[2].y+pts[3].y)/4;
-  const w=(Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y) + Math.hypot(pts[2].x-pts[3].x, pts[2].y-pts[3].y))/2;
-  const h=(Math.hypot(pts[3].x-pts[0].x, pts[3].y-pts[0].y) + Math.hypot(pts[2].x-pts[1].x, pts[2].y-pts[1].y))/2;
+  const w=(Math.hypot(pts[1].x-pts[0].x,pts[1].y-pts[0].y)+Math.hypot(pts[2].x-pts[3].x,pts[2].y-pts[3].y))/2;
+  const h=(Math.hypot(pts[3].x-pts[0].x,pts[3].y-pts[0].y)+Math.hypot(pts[2].x-pts[1].x,pts[2].y-pts[1].y))/2;
   const halfW=w/2, halfH=h/2;
   [{x:cx-halfW,y:cy-halfH},{x:cx+halfW,y:cy-halfH},{x:cx+halfW,y:cy+halfH},{x:cx-halfW,y:cy+halfH}]
     .forEach((p,i)=> setHandle(i,p.x,p.y));
   updateStatus('Auf 90° eingerastet.');
+}
+function rotatePhoto(deg){
+  if(!photoCanvas.width) return;
+  const c=document.createElement('canvas'); c.width=photoCanvas.width; c.height=photoCanvas.height;
+  const x=c.getContext('2d'); x.translate(c.width/2,c.height/2); x.rotate(deg*Math.PI/180); x.drawImage(photoCanvas,-c.width/2,-c.height/2);
+  ctxPhoto.clearRect(0,0,photoCanvas.width,photoCanvas.height); ctxPhoto.drawImage(c,0,0);
+  placeDefaultHandles();
 }
 
 /* ===== Entzerren + Gitternetz ===== */
@@ -403,28 +442,256 @@ function warpBoard(){
     const M=cv.getPerspectiveTransform(srcTri,dstTri);
     let dst=new cv.Mat(); cv.warpPerspective(srcMat,dst,M,new cv.Size(dest,dest),cv.INTER_LINEAR,cv.BORDER_REPLICATE);
 
-    warpPreview.width=dest; warpPreview.height=dest;
+    warpPreview.width=dest; warpPreview.height=dest; anno.width=dest; anno.height=dest;
     const tmp=document.createElement('canvas'); tmp.width=dest; tmp.height=dest; cv.imshow(tmp,dst);
     ctxPreview.clearRect(0,0,dest,dest); ctxPreview.drawImage(tmp,0,0); drawGrid();
-    warpedImage=tmp;
+    warpedImage=tmp; clearOverlay(); predictedBoard = Array.from({length:8}, ()=>Array(8).fill('')); board = predictedBoard.map(r=>r.slice());
+    fenOut.value='';
 
     srcMat.delete(); srcTri.delete(); dstTri.delete(); M.delete(); dst.delete();
-    updateStatus('Brett entzerrt. Gitternetz prüfen.');
+    updateStatus('Brett entzerrt. Optional Regler anpassen, dann „Stellung erkennen“.');
   }catch(e){ updateStatus('Entzerren fehlgeschlagen: '+e, true); }
 }
 
-/* ===== Events & Init ===== */
+/* ===== Auto-Orientierung (Weiß unten rechts) ===== */
+function meanBrightOfSquare(row,col,matGray){
+  const s=warpPreview.width, cell=Math.floor(s/8);
+  const x=col*cell, y=row*cell, pad=Math.floor(cell*0.2);
+  const roi = matGray.roi(new cv.Rect(x+pad,y+pad,cell-2*pad,cell-2*pad));
+  const mean = cv.mean(roi)[0]; roi.delete(); return mean;
+}
+function autoOrientWhiteBottomRight(){
+  if(!warpedImage){ updateStatus('Kein entzerrtes Bild.', true); return; }
+  const rotations=[0,90,180,270]; let best=0, bestScore=-1;
+  for(let i=0;i<4;i++){
+    // draw rotated into temp canvas
+    const c=document.createElement('canvas'); c.width=800; c.height=800;
+    const x=c.getContext('2d'); x.translate(400,400); x.rotate(rotations[i]*Math.PI/180); x.drawImage(warpedImage,-400,-400);
+    // measure brightness bottom-right
+    let g=cv.imread(c); cv.cvtColor(g,g,cv.COLOR_RGBA2GRAY);
+    const br = meanBrightOfSquare(7,7,g), bl=meanBrightOfSquare(7,6,g);
+    const tr = meanBrightOfSquare(0,7,g), tl=meanBrightOfSquare(0,0,g);
+    const score = br - tl; // grob: hell unten rechts, dunkel oben links
+    g.delete();
+    if(score>bestScore){ bestScore=score; best=i; }
+  }
+  // apply best
+  const x=ctxPreview; x.clearRect(0,0,800,800);
+  x.save(); x.translate(400,400); x.rotate(rotations[best]*Math.PI/180); x.drawImage(warpedImage,-400,-400); x.restore();
+  drawGrid();
+  // update warpedImage to new orientation
+  const newC=document.createElement('canvas'); newC.width=800; newC.height=800; newC.getContext('2d').drawImage(warpPreview,0,0);
+  warpedImage=newC; clearOverlay();
+  updateStatus('Ausrichtung gesetzt: Weiß unten rechts.');
+}
+
+/* ===== Brightness/Contrast (für Erkennung) ===== */
+function preprocessForDetection(){
+  // erzeugt cv.Mat (GRAY) mit Helligkeit/Kontrast-Anpassung
+  let src=cv.imread(warpedImage);
+  let out=new cv.Mat(); src.convertTo(out, -1, 1 + (Number(rngContrast.value)||0)/50, (Number(rngBright.value)||0)*2.5);
+  cv.cvtColor(out,out,cv.COLOR_RGBA2GRAY);
+  src.delete();
+  return out; // Mat GRAY
+}
+
+/* ===== Erkennung: Belegung + Farbe (heuristisch) ===== */
+function detectBoard(){
+  if(!warpedImage){ updateStatus('Kein entzerrtes Bild.', true); return; }
+  let gray = preprocessForDetection(); // cv.Mat GRAY
+  // global Kantenmaß
+  let lap=new cv.Mat(); cv.Laplacian(gray, lap, cv.CV_16S, 3, 1, 0, cv.BORDER_DEFAULT);
+  let absLap=new cv.Mat(); cv.convertScaleAbs(lap, absLap);
+  const s=warpPreview.width, cell = Math.floor(s/8);
+  // Referenz-Helligkeit hell/dunkel Felder
+  let sumLight=0, cntLight=0, sumDark=0, cntDark=0;
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++){
+    const m=meanBrightOfSquare(r,c,gray);
+    if( (r+c)%2===0 ){ sumLight+=m; cntLight++; } else { sumDark+=m; cntDark++; }
+  }
+  const meanLight = sumLight/cntLight, meanDark = sumDark/cntDark;
+
+  let occ = Array.from({length:8}, ()=>Array(8).fill(false));
+  let guess = Array.from({length:8}, ()=>Array(8).fill(''));
+  let tileVals=[];
+  // global Schwelle für Besetzung
+  let globalVals=[];
+  for(let r=0;r<8;r++) for(let c=0;c<8;c++){
+    const x=c*cell, y=r*cell, pad=Math.floor(cell*0.15);
+    const roi = absLap.roi(new cv.Rect(x+pad,y+pad,cell-2*pad,cell-2*pad));
+    const meanK = cv.mean(roi)[0]; roi.delete();
+    globalVals.push(meanK);
+  }
+  globalVals.sort((a,b)=>a-b);
+  const medK = globalVals[Math.floor(globalVals.length*0.5)] || 0;
+  const thrK = medK*1.6 + 8; // heuristisch
+
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+      const x=c*cell, y=r*cell;
+      const pad=Math.floor(cell*0.15);
+      const roiK = absLap.roi(new cv.Rect(x+pad,y+pad,cell-2*pad,cell-2*pad));
+      const kVal = cv.mean(roiK)[0]; roiK.delete();
+      const roiG = gray.roi(new cv.Rect(x+pad,y+pad,cell-2*pad,cell-2*pad));
+      const gVal = cv.mean(roiG)[0]; roiG.delete();
+
+      const bg = ((r+c)%2===0) ? meanLight : meanDark;
+      const contrastToBg = Math.abs(gVal - bg);
+
+      const occupied = (kVal>thrK) || (contrastToBg > 12);
+      occ[r][c]=occupied;
+      if(!occupied){ guess[r][c]=''; continue; }
+
+      // Farbe schätzen: ist Zentrum heller als Hintergrund? (weiß) sonst schwarz
+      const centerPad=Math.floor(cell*0.30);
+      const roiC = gray.roi(new cv.Rect(x+centerPad,y+centerPad,cell-2*centerPad,cell-2*centerPad));
+      const centerMean = cv.mean(roiC)[0]; roiC.delete();
+      const isWhite = centerMean > bg + 6;
+      guess[r][c] = isWhite ? 'P' : 'p'; // Typ = erstmal Bauer
+    }
+  }
+  lap.delete(); absLap.delete(); gray.delete();
+  predictedBoard = guess.map(r=>r.slice());
+  board = guess.map(r=>r.slice());
+  redrawOverlay();
+  updateFEN();
+  updateStatus('Erkennung ausgeführt. Tipp ein Feld an, um zu korrigieren. Danach FEN kopieren/öffnen.');
+}
+
+/* ===== Board Overlay / Edit ===== */
+function clearOverlay(){ ctxAnno.clearRect(0,0,anno.width,anno.height); }
+function redrawOverlay(){
+  clearOverlay();
+  const s=anno.width, cell=s/8;
+  ctxAnno.save();
+  ctxAnno.textAlign='center'; ctxAnno.textBaseline='middle';
+  ctxAnno.font = (cell*0.6)+'px system-ui';
+  for(let r=0;r<8;r++){
+    for(let c=0;c<8;c++){
+      const ch=board[r][c];
+      if(!ch) continue;
+      const isWhite = (ch===ch.toUpperCase());
+      const sym = {
+        'P':'♙','N':'♘','B':'♗','R':'♖','Q':'♕','K':'♔',
+        'p':'♟','n':'♞','b':'♝','r':'♜','q':'♛','k':'♚'
+      }[ch] || ch;
+      ctxAnno.fillStyle = isWhite ? '#f8fafc' : '#111827';
+      // dunkler Rand für weiße Figuren auf hellen Feldern
+      ctxAnno.strokeStyle = 'rgba(0,0,0,.6)'; ctxAnno.lineWidth=2;
+      const cx=c*cell+cell/2, cy=r*cell+cell/2;
+      ctxAnno.strokeText(sym, cx, cy);
+      ctxAnno.fillText(sym, cx, cy);
+    }
+  }
+  ctxAnno.restore();
+}
+function canvasToSquareCoords(x,y){
+  const rect=anno.getBoundingClientRect();
+  const dx=(x-rect.left)/rect.width, dy=(y-rect.top)/rect.height;
+  let c=Math.floor(dx*8), r=Math.floor(dy*8);
+  c=Math.max(0,Math.min(7,c)); r=Math.max(0,Math.min(7,r));
+  return {r,c};
+}
+let lastTap=0;
+anno.addEventListener('click', (e)=>{
+  const now=Date.now();
+  const {r,c}=canvasToSquareCoords(e.clientX,e.clientY);
+  if(now-lastTap<300){ board[r][c]=''; redrawOverlay(); updateFEN(); lastTap=0; return; } // Doppeltipp leert Feld
+  lastTap=now;
+  if(currentTool===undefined) return;
+  board[r][c]=currentTool;
+  redrawOverlay(); updateFEN();
+});
+palette.addEventListener('click', (e)=>{
+  const btn=e.target.closest('.pieceBtn'); if(!btn) return;
+  [...palette.querySelectorAll('.pieceBtn')].forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active'); currentTool = btn.dataset.piece;
+});
+document.querySelector('.pieceBtn[data-piece=""]').classList.add('active'); currentTool='';
+
+/* ===== FEN ===== */
+function boardToFEN(bd){
+  // FEN verlangt Reihen 8->1 (oben nach unten). Unser r=0 ist oben.
+  const rows=[];
+  for(let r=0;r<8;r++){
+    let line='', empty=0;
+    for(let c=0;c<8;c++){
+      const ch=bd[r][c];
+      if(!ch){ empty++; }
+      else { if(empty){ line+=String(empty); empty=0; } line+=ch; }
+    }
+    if(empty) line+=String(empty);
+    rows.push(line||'8');
+  }
+  return rows.join('/')+' w - - 0 1';
+}
+function updateFEN(){
+  const fen = boardToFEN(board);
+  fenOut.value = fen;
+}
+
+/* ===== Aktionen ===== */
+function drawGridAndImage(){
+  ctxPreview.clearRect(0,0,warpPreview.width,warpPreview.height);
+  ctxPreview.drawImage(warpedImage,0,0);
+  drawGrid();
+}
+function applyPreview(){ drawGridAndImage(); redrawOverlay(); }
+
 btnStart.addEventListener('click', ()=> startStream(cameraSelect.value||undefined));
 cameraSelect.addEventListener('change', ()=> startStream(cameraSelect.value));
-
-btnAutoPro.addEventListener('click', autoFindCornersPro);
-btnSnapRect.addEventListener('click', snapToOrthogonal);
-
-btnWarp.addEventListener('click', warpBoard);
 btnResetCorners.addEventListener('click', ()=>{ if(latestImage){ ctxPhoto.drawImage(latestImage,0,0); placeDefaultHandles(); } });
 btnRotL.addEventListener('click', ()=> rotatePhoto(-90));
 btnRotR.addEventListener('click', ()=> rotatePhoto(90));
+btnWarp.addEventListener('click', warpBoard);
+btnAutoPro.addEventListener('click', autoFindCornersPro);
+btnSnapRect.addEventListener('click', snapToOrthogonal);
 
+btnAutoOrient.addEventListener('click', ()=>{ if(!warpedImage){ updateStatus('Kein entzerrtes Bild.',true); return; } autoOrientWhiteBottomRight(); redrawOverlay(); updateFEN(); });
+
+rngBright.addEventListener('input', ()=>{ lblBright.textContent=rngBright.value; });
+rngContrast.addEventListener('input', ()=>{ lblContrast.textContent=rngContrast.value; });
+
+btnDetect.addEventListener('click', ()=>{ detectBoard(); });
+btnResetPred.addEventListener('click', ()=>{ board = predictedBoard.map(r=>r.slice()); redrawOverlay(); updateFEN(); });
+btnClear.addEventListener('click', ()=>{ board = Array.from({length:8},()=>Array(8).fill('')); redrawOverlay(); updateFEN(); });
+
+btnCopyFEN.addEventListener('click', async ()=>{
+  try{ await navigator.clipboard.writeText(fenOut.value||''); updateStatus('FEN kopiert.'); }catch(e){ updateStatus('Kopieren nicht möglich.',true); }
+});
+btnLichess.addEventListener('click', ()=>{
+  const fen=encodeURIComponent(fenOut.value||'');
+  const url=`https://lichess.org/analysis/fromPosition?fen=${fen}`;
+  window.open(url, '_blank');
+});
+
+btnRetake.addEventListener('click', ()=>{
+  // nach oben scrollen & Kamera wieder zeigen
+  window.scrollTo({top:0, behavior:'smooth'});
+  updateStatus('Bereit zum Neuaufnehmen. Starte ggf. die Kamera.', false);
+});
+btnSaveImage.addEventListener('click', ()=>{
+  if(!warpedImage){ updateStatus('Kein Bild zum Speichern.', true); return; }
+  const a=document.createElement('a');
+  a.href=warpedImage.toDataURL('image/jpeg',0.95);
+  a.download='schachbrett.jpg'; a.click();
+});
+btnShareImage.addEventListener('click', async ()=>{
+  if(!warpedImage){ updateStatus('Kein Bild zum Teilen.', true); return; }
+  try{
+    const blob = await new Promise(res=> warpedImage.toBlob(res,'image/jpeg',0.95));
+    if(navigator.canShare && navigator.canShare({files:[new File([blob],'schachbrett.jpg',{type:'image/jpeg'})]})){
+      await navigator.share({ files:[new File([blob],'schachbrett.jpg',{type:'image/jpeg'})], title:'Schachbrett', text:fenOut.value });
+    }else{
+      // Fallback: Link kopieren
+      await navigator.clipboard.writeText(fenOut.value||'');
+      updateStatus('Teilen nicht unterstützt – FEN in Zwischenablage kopiert.');
+    }
+  }catch(e){ updateStatus('Teilen abgebrochen oder nicht möglich.', true); }
+});
+
+/* ===== Init ===== */
+if (location.protocol!=='https:') showDiag('Hinweis: Für den Kamerazugriff ist HTTPS nötig (GitHub Pages URL mit https://).');
 if ('mediaDevices' in navigator){ listCameras(); }
 </script>
 </body>
