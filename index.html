@@ -5,16 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Schachbrett fotografieren & entzerren</title>
   <style>
-    :root { --bg:#0b1020; --panel:#0f172a; --text:#e5e7eb; --muted:#94a3b8; --accent:#60a5fa; }
+    :root { --bg:#0b1020; --panel:#0f172a; --text:#e5e7eb; --muted:#94a3b8; }
     * { box-sizing: border-box; }
-    body { margin:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial; background:#0b1020; color:var(--text); }
+    body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; background:#0b1020; color:var(--text); }
     header { padding:12px 14px; background:#111827; font-weight:700; }
-    main { padding:12px; max-width:900px; margin:0 auto 60px; }
-    .card { background:#0b1120; border:1px solid #1f2937; border-radius:14px; overflow:hidden; }
-    .hd { padding:10px 12px; border-bottom:1px solid #1f2937; font-weight:700; background:#0d1428; }
-    .bd { padding:12px; }
+    main   { padding:12px; max-width:900px; margin:0 auto 60px; }
+    .card  { background:#0b1120; border:1px solid #1f2937; border-radius:14px; overflow:hidden; }
+    .hd    { padding:10px 12px; border-bottom:1px solid #1f2937; font-weight:700; background:#0d1428; }
+    .bd    { padding:12px; }
+
     .video-wrap { position:relative; aspect-ratio:1/1; border-radius:12px; overflow:hidden; background:#000; }
-    video { width:100%; height:100%; display:block; object-fit:cover; aspect-ratio:1/1; background:#000; }
+    video { width:100%; height:100%; display:block; object-fit:cover; background:#000; }
     #overlay { position:absolute; inset:0; pointer-events:none; border:2px dashed rgba(255,255,255,.25); }
     #overlay .hline, #overlay .vline { position:absolute; background:rgba(255,255,255,.18); }
     #overlay .hline { left:0; right:0; height:1px; top:50%; }
@@ -23,7 +24,8 @@
     .controls { display:flex; gap:8px; flex-wrap:wrap; }
     button { padding:10px 12px; border-radius:10px; border:1px solid #1f2937; background:#1e3a8a; color:#fff; cursor:pointer; }
     button.ghost { background:#374151; }
-    button.ok { background:#059669; border-color:#04684e; }
+    button.ok    { background:#059669; border-color:#04684e; }
+    select { padding:10px; border-radius:10px; border:1px solid #1f2937; background:#0b1120; color:#e5e7eb; }
     p#status { color:var(--muted); margin:8px 0 0 0; }
 
     .canvasWrap { position:relative; display:inline-block; max-width:100%; border-radius:12px; overflow:hidden; border:1px solid #1f2937; }
@@ -46,13 +48,11 @@
     <div class="bd">
       <div class="video-wrap" id="videoWrap">
         <video id="video" playsinline autoplay muted></video>
-        <div id="overlay">
-          <div class="hline"></div>
-          <div class="vline"></div>
-        </div>
+        <div id="overlay"><div class="hline"></div><div class="vline"></div></div>
       </div>
       <div class="controls" style="margin-top:10px;">
         <button id="btnStart">Kamera Start</button>
+        <select id="cameraSelect" title="Kamera wählen"></select>
         <button id="btnShoot">📸 Brett fotografieren</button>
       </div>
       <p id="status">Tippe „Kamera Start“ und erlaube den Zugriff.</p>
@@ -92,16 +92,16 @@
 
 </main>
 
-<!-- OpenCV für Warp / Hough -->
+<!-- OpenCV -->
 <script async src="https://docs.opencv.org/4.x/opencv.js"></script>
 <script>
-/* ========= Elemente ========= */
+/* ======== DOM ======== */
 const video = document.getElementById('video');
 const btnStart = document.getElementById('btnStart');
 const btnShoot = document.getElementById('btnShoot');
 const statusEl = document.getElementById('status');
+const cameraSelect = document.getElementById('cameraSelect');
 
-const photoWrap = document.getElementById('photoWrap');
 const photoCanvas = document.getElementById('photoCanvas');
 const ctxPhoto = photoCanvas.getContext('2d');
 const handles = [0,1,2,3].map(i => document.getElementById('h'+i));
@@ -117,17 +117,33 @@ const warpPreview = document.getElementById('warpPreview');
 const ctxPreview = warpPreview.getContext('2d');
 const toggleGrid = document.getElementById('toggleGrid');
 
+/* ======== State ======== */
 let currentStream = null;
-let latestImage = null;   // Image-Objekt des aktuell aufgenommenen Bildes
-let warpedImage = null;   // Canvas des entzerrten Bretts (für Preview)
+let latestImage = null;   // Image-Objekt des aufgenommenen Bildes
+let warpedImage = null;   // Canvas des entzerrten Bretts
 
-/* ========= Helpers ========= */
+/* ======== Helpers ======== */
 const updateStatus = (msg, isErr=false)=>{
   statusEl.textContent = msg;
   statusEl.style.color = isErr ? '#f87171' : '#94a3b8';
 };
 
-function setHandle(i, xPx, yPx){ // x/y in Canvas-Pixel
+async function listCameras(){
+  try{
+    const all = await navigator.mediaDevices.enumerateDevices();
+    const devs = all.filter(d=>d.kind==='videoinput');
+    cameraSelect.innerHTML='';
+    devs.forEach((d,i)=>{
+      const o=document.createElement('option');
+      o.value=d.deviceId; o.textContent=d.label||`Kamera ${i+1}`;
+      cameraSelect.appendChild(o);
+    });
+    const env = devs.find(d=>/back|rear|environment/i.test(d.label));
+    if(env) cameraSelect.value = env.deviceId;
+  }catch{}
+}
+
+function setHandle(i, xPx, yPx){ // in Canvas-Pixel
   handles[i].style.left = (xPx / photoCanvas.width * 100) + '%';
   handles[i].style.top  = (yPx / photoCanvas.height * 100) + '%';
 }
@@ -137,18 +153,17 @@ function placeDefaultHandles(){
   setHandle(2, photoCanvas.width - 10, photoCanvas.height - 10);
   setHandle(3, 10, photoCanvas.height - 10);
 }
-function getHandlePoints(){ // TL,TR,BR,BL in Canvas-Pixeln
+function getHandlePoints(){ // TL,TR,BR,BL (Canvas-Pixel)
   return handles.map(h=>{
-    const xPct = parseFloat(h.style.left) || 0;
-    const yPct = parseFloat(h.style.top) || 0;
-    return { x: xPct/100 * photoCanvas.width, y: yPct/100 * photoCanvas.height };
+    const xPct=parseFloat(h.style.left)||0, yPct=parseFloat(h.style.top)||0;
+    return { x:xPct/100 * photoCanvas.width, y:yPct/100 * photoCanvas.height };
   });
 }
 
-/* ========= Dragging der Griffe (prozentual, responsiv-sicher) ========= */
+/* Dragging (prozentual) */
 handles.forEach(h=>{
   let dragging=false;
-  const move = (clientX, clientY)=>{
+  const move=(clientX,clientY)=>{
     const r = photoCanvas.getBoundingClientRect();
     const x = Math.max(0, Math.min(r.width,  clientX - r.left));
     const y = Math.max(0, Math.min(r.height, clientY - r.top));
@@ -156,163 +171,150 @@ handles.forEach(h=>{
     h.style.top  = (y / r.height * 100) + '%';
   };
   h.addEventListener('mousedown', e=>{ dragging=true; e.preventDefault(); });
-  window.addEventListener('mousemove', e=>{ if(dragging) move(e.clientX, e.clientY); });
+  window.addEventListener('mousemove', e=>{ if(dragging) move(e.clientX,e.clientY); });
   window.addEventListener('mouseup', ()=> dragging=false);
   h.addEventListener('touchstart', e=>{ dragging=true; e.preventDefault(); }, {passive:false});
-  window.addEventListener('touchmove', e=>{ if(!dragging) return; const t=e.touches[0]; move(t.clientX, t.clientY); }, {passive:false});
+  window.addEventListener('touchmove', e=>{ if(!dragging) return; const t=e.touches[0]; move(t.clientX,t.clientY); }, {passive:false});
   window.addEventListener('touchend', ()=> dragging=false);
 });
 
-/* ========= Kamera starten (mit Fallbacks) ========= */
-async function startStream(){
-  if(!navigator.mediaDevices?.getUserMedia){
-    updateStatus('Browser unterstützt keinen Kamerazugriff.', true); return;
-  }
-  // iOS-Safe
-  video.setAttribute('playsinline',''); video.setAttribute('muted','');
-
-  // Vorherigen Stream stoppen
+/* ======== Kamera – gleiche Logik wie zuvor (robuste Fallbacks, keine starre aspectRatio) ======== */
+async function startStream(deviceId){
+  if(!navigator.mediaDevices?.getUserMedia){ updateStatus('Browser unterstützt keinen Kamerazugriff.', true); return; }
+  // Sicherheit für iOS
+  video.setAttribute('playsinline',''); video.muted=true;
+  // alten Stream stoppen
   if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); currentStream=null; }
 
-  const attempts = [
-    { audio:false, video:{ facingMode:{ideal:'environment'}, aspectRatio:{ideal:1}, width:{ideal:1920}, height:{ideal:1920} } },
-    { audio:false, video:{ facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080} } },
-    { audio:false, video:true }
+  const base = { audio:false, video:{ facingMode:{ideal:'environment'} } };
+  if (deviceId) base.video.deviceId = { exact: deviceId };
+
+  const tries = [
+    base,                                              // bevorzugte Rückkamera
+    { audio:false, video:{ facingMode:'environment' } },
+    { audio:false, video:true }                        // notfalls irgendwas
   ];
-  let lastErr = null;
-  for(const c of attempts){
+  let last;
+  for(const c of tries){
     try{
       const s = await navigator.mediaDevices.getUserMedia(c);
-      currentStream = s; video.srcObject = s; await video.play();
-      const st = s.getVideoTracks()[0].getSettings?.() || {};
-      updateStatus('Kamera aktiv ('+(st.width||'?')+'×'+(st.height||'?')+')');
+      currentStream = s; video.srcObject=s; await video.play();
+      const st = s.getVideoTracks()[0].getSettings?.()||{};
+      updateStatus(`Kamera aktiv (${st.width||'?'}×${st.height||'?'})`);
+      listCameras();
       return;
-    }catch(e){ lastErr=e; console.warn('getUserMedia failed with', c, e); }
+    }catch(e){ last=e; console.warn('getUserMedia fail', c, e); }
   }
-  updateStatus('Kamera konnte nicht gestartet werden: '+(lastErr?.name||'Unbekannt')+' – '+(lastErr?.message||''), true);
+  updateStatus(`Kamera-Start fehlgeschlagen: ${last?.name||''} ${last?.message||''}`, true);
 }
 
-/* ========= Foto aufnehmen: quadratischer Crop ========= */
+/* ======== Foto aufnehmen: quadratischer Crop ======== */
 function takeShot(){
   if(!video.videoWidth){ updateStatus('Video noch nicht bereit.', true); return; }
-  const vw = video.videoWidth, vh = video.videoHeight;
-  const side = Math.min(vw, vh);
-  const sx = Math.floor((vw - side)/2), sy = Math.floor((vh - side)/2);
+  const vw=video.videoWidth, vh=video.videoHeight;
+  const side=Math.min(vw,vh);
+  const sx=Math.floor((vw-side)/2), sy=Math.floor((vh-side)/2);
 
-  photoCanvas.width = side; photoCanvas.height = side;
-  ctxPhoto.drawImage(video, sx, sy, side, side, 0, 0, side, side);
+  photoCanvas.width=side; photoCanvas.height=side;
+  ctxPhoto.drawImage(video, sx,sy,side,side, 0,0,side,side);
 
-  latestImage = new Image();
-  latestImage.onload = ()=> placeDefaultHandles();
-  latestImage.src = photoCanvas.toDataURL('image/jpeg', 0.95);
+  latestImage=new Image();
+  latestImage.onload=()=> placeDefaultHandles();
+  latestImage.src=photoCanvas.toDataURL('image/jpeg',0.95);
 
   updateStatus('Foto aufgenommen. Setze die vier Ecken exakt an die Brett-Außenkanten.');
 }
 
-/* ========= Rotieren/Reset ========= */
+/* ======== Rotieren/Reset ======== */
 function rotatePhoto(deg){
   if(!photoCanvas.width) return;
-  const c = document.createElement('canvas');
-  c.width = photoCanvas.width; c.height = photoCanvas.height;
-  const x = c.getContext('2d');
-  x.translate(c.width/2, c.height/2);
-  x.rotate(deg * Math.PI/180);
-  x.drawImage(photoCanvas, -c.width/2, -c.height/2);
-  ctxPhoto.clearRect(0,0,photoCanvas.width,photoCanvas.height);
-  ctxPhoto.drawImage(c,0,0);
-  placeDefaultHandles(); // Griffe zurück (nach Rotation neu setzen)
+  const c=document.createElement('canvas'); c.width=photoCanvas.width; c.height=photoCanvas.height;
+  const x=c.getContext('2d'); x.translate(c.width/2,c.height/2); x.rotate(deg*Math.PI/180); x.drawImage(photoCanvas,-c.width/2,-c.height/2);
+  ctxPhoto.clearRect(0,0,photoCanvas.width,photoCanvas.height); ctxPhoto.drawImage(c,0,0);
+  placeDefaultHandles();
 }
 
-/* ========= Auto-Ecken (Hough) ========= */
+/* ======== Auto-Ecken (Hough) ======== */
 function autoFindCornersHough(){
   try{
-    const src = cv.imread(photoCanvas);
-    let gray = new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-    cv.GaussianBlur(gray, gray, new cv.Size(3,3), 0, 0);
-    let edges = new cv.Mat(); cv.Canny(gray, edges, 60, 180);
-    let lines = new cv.Mat(); cv.HoughLinesP(edges, lines, 1, Math.PI/180, 60, 60, 10);
+    const src=cv.imread(photoCanvas); let gray=new cv.Mat(); cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
+    cv.GaussianBlur(gray,gray,new cv.Size(3,3),0,0);
+    let edges=new cv.Mat(); cv.Canny(gray,edges,60,180);
+    let lines=new cv.Mat(); cv.HoughLinesP(edges,lines,1,Math.PI/180,60,60,10);
 
     let vertical=[], horizontal=[];
     for(let i=0;i<lines.rows;i++){
-      const [x1,y1,x2,y2] = lines.intPtr(i,0);
-      const ang = Math.abs(Math.atan2(y2-y1, x2-x1) * 180/Math.PI);
-      if(ang<20 || ang>160) horizontal.push([x1,y1,x2,y2]);
+      const [x1,y1,x2,y2]=lines.intPtr(i,0);
+      const ang=Math.abs(Math.atan2(y2-y1,x2-x1)*180/Math.PI);
+      if(ang<20||ang>160) horizontal.push([x1,y1,x2,y2]);
       else if(Math.abs(ang-90)<20) vertical.push([x1,y1,x2,y2]);
     }
-    const left = vertical.reduce((a,b)=> (Math.min(b[0],b[2]) < (a?Math.min(a[0],a[2]):1e9))?b:a, null);
-    const right= vertical.reduce((a,b)=> (Math.max(b[0],b[2]) > (a?Math.max(a[0],a[2]):-1e9))?b:a, null);
-    const top  = horizontal.reduce((a,b)=> (Math.min(b[1],b[3]) < (a?Math.min(a[1],a[3]):1e9))?b:a, null);
-    const bottom=horizontal.reduce((a,b)=> (Math.max(b[1],b[3]) > (a?Math.max(a[1],a[3]):-1e9))?b:a, null);
-    const inter=(l1,l2)=>{ const [x1,y1,x2,y2]=l1,[x3,y3,x4,y4]=l2; const den=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4); if(!den) return null; const px=((x1*y2-y1*x2)*(x3-x4)-(x1-x2)*(x3*y4-y3*x4))/den; const py=((x1*y2-y1*x2)*(y3-y4)-(y1-y2)*(x3*y4-y3*x4))/den; return {x:px,y:py}; };
-    if(left && right && top && bottom){
-      const pts=[ inter(top,left), inter(top,right), inter(bottom,right), inter(bottom,left) ];
-      pts.forEach((p,i)=>{ if(!p) return; setHandle(i, p.x, p.y); });
-      updateStatus('Ecken automatisch gesetzt (Kanten-Methode). Prüfe kurz nach.');
+    const left  = vertical.reduce((a,b)=> (Math.min(b[0],b[2]) < (a?Math.min(a[0],a[2]):1e9))?b:a, null);
+    const right = vertical.reduce((a,b)=> (Math.max(b[0],b[2]) > (a?Math.max(a[0],a[2]):-1e9))?b:a, null);
+    const top   = horizontal.reduce((a,b)=> (Math.min(b[1],b[3]) < (a?Math.min(a[1],a[3]):1e9))?b:a, null);
+    const bottom= horizontal.reduce((a,b)=> (Math.max(b[1],b[3]) > (a?Math.max(a[1],a[3]):-1e9))?b:a, null);
+    const inter=(l1,l2)=>{ const [x1,y1,x2,y2]=l1,[x3,y3,x4,y4]=l2; const den=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4); if(!den) return null;
+      const px=((x1*y2-y1*x2)*(x3-x4)-(x1-x2)*(x3*y4-y3*x4))/den;
+      const py=((x1*y2-y1*x2)*(y3-y4)-(y1-y2)*(x3*y4-y3*x4))/den; return {x:px,y:py}; };
+    if(left&&right&&top&&bottom){
+      [inter(top,left),inter(top,right),inter(bottom,right),inter(bottom,left)]
+        .forEach((p,i)=>{ if(p) setHandle(i,p.x,p.y); });
+      updateStatus('Ecken automatisch gesetzt (Kanten). Prüfe kurz nach.');
     } else {
-      updateStatus('Kanten zu uneindeutig. Bitte Ecken manuell oder Snap 90° nutzen.', true);
+      updateStatus('Kanten zu uneindeutig. Ecken manuell oder „Snap 90°“ nutzen.', true);
     }
     src.delete(); gray.delete(); edges.delete(); lines.delete();
-  }catch(e){ updateStatus('OpenCV (Hough) noch nicht geladen? Versuche nach ein paar Sekunden erneut.', true); }
+  }catch(e){ updateStatus('OpenCV (Hough) noch nicht geladen? Versuche gleich erneut.', true); }
 }
 
-/* ========= Snap auf 90° ========= */
+/* ======== Snap 90° ======== */
 function snapToOrthogonal(){
-  const pts = getHandlePoints();
+  const pts=getHandlePoints();
   const cx=(pts[0].x+pts[1].x+pts[2].x+pts[3].x)/4, cy=(pts[0].y+pts[1].y+pts[2].y+pts[3].y)/4;
-  const w=(Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y)+Math.hypot(pts[2].x-pts[3].x, pts[2].y-pts[3].y))/2;
-  const h=(Math.hypot(pts[3].x-pts[0].x, pts[3].y-pts[0].y)+Math.hypot(pts[2].x-pts[1].x, pts[2].y-pts[1].y))/2;
+  const w=(Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y) + Math.hypot(pts[2].x-pts[3].x, pts[2].y-pts[3].y))/2;
+  const h=(Math.hypot(pts[3].x-pts[0].x, pts[3].y-pts[0].y) + Math.hypot(pts[2].x-pts[1].x, pts[2].y-pts[1].y))/2;
   const halfW=w/2, halfH=h/2;
-  const target=[ {x:cx-halfW, y:cy-halfH}, {x:cx+halfW, y:cy-halfH}, {x:cx+halfW, y:cy+halfH}, {x:cx-halfW, y:cy+halfH} ];
-  target.forEach((p,i)=> setHandle(i, p.x, p.y));
+  [{x:cx-halfW,y:cy-halfH},{x:cx+halfW,y:cy-halfH},{x:cx+halfW,y:cy+halfH},{x:cx-halfW,y:cy+halfH}]
+    .forEach((p,i)=> setHandle(i,p.x,p.y));
   updateStatus('Auf 90° eingerastet.');
 }
 
-/* ========= Entzerren (Homographie) + Preview mit Gitternetz ========= */
+/* ======== Entzerren + Gitternetz ======== */
+function drawGrid(){
+  if(!toggleGrid.checked) return;
+  const s=warpPreview.width;
+  ctxPreview.save(); ctxPreview.strokeStyle='rgba(255,255,255,.5)'; ctxPreview.lineWidth=1;
+  for(let i=1;i<8;i++){ const x=Math.round((s/8)*i);
+    ctxPreview.beginPath(); ctxPreview.moveTo(x,0); ctxPreview.lineTo(x,s); ctxPreview.stroke();
+    ctxPreview.beginPath(); ctxPreview.moveTo(0,x); ctxPreview.lineTo(s,x); ctxPreview.stroke();
+  }
+  ctxPreview.restore();
+}
 function warpBoard(){
   if(!photoCanvas.width){ updateStatus('Kein Bild vorhanden.', true); return; }
   try{
-    const pts = getHandlePoints(); // TL,TR,BR,BL in Canvas-Pixeln
-    const dest = 800;
-    const srcMat = cv.imread(photoCanvas);
-    const srcTri = cv.matFromArray(4,1,cv.CV_32FC2, new Float32Array([ pts[0].x,pts[0].y, pts[1].x,pts[1].y, pts[2].x,pts[2].y, pts[3].x,pts[3].y ]));
-    const dstTri = cv.matFromArray(4,1,cv.CV_32FC2, new Float32Array([ 0,0, dest,0, dest,dest, 0,dest ]));
-    const M = cv.getPerspectiveTransform(srcTri, dstTri);
-    let dst = new cv.Mat();
-    cv.warpPerspective(srcMat, dst, M, new cv.Size(dest,dest), cv.INTER_LINEAR, cv.BORDER_REPLICATE);
+    const pts=getHandlePoints(); const dest=800;
+    const srcMat=cv.imread(photoCanvas);
+    const srcTri=cv.matFromArray(4,1,cv.CV_32FC2,new Float32Array([pts[0].x,pts[0].y,pts[1].x,pts[1].y,pts[2].x,pts[2].y,pts[3].x,pts[3].y]));
+    const dstTri=cv.matFromArray(4,1,cv.CV_32FC2,new Float32Array([0,0,dest,0,dest,dest,0,dest]));
+    const M=cv.getPerspectiveTransform(srcTri,dstTri);
+    let dst=new cv.Mat(); cv.warpPerspective(srcMat,dst,M,new cv.Size(dest,dest),cv.INTER_LINEAR,cv.BORDER_REPLICATE);
 
-    // Preview-Canvas aktualisieren
-    warpPreview.width = dest; warpPreview.height = dest;
-    const tmp = document.createElement('canvas'); tmp.width=dest; tmp.height=dest; cv.imshow(tmp, dst);
-    ctxPreview.clearRect(0,0,dest,dest); ctxPreview.drawImage(tmp,0,0);
-
-    // Gitternetz
-    drawGrid();
-
-    // Merken (falls du später Erkennung/Export anschließen willst)
-    warpedImage = tmp;
+    warpPreview.width=dest; warpPreview.height=dest;
+    const tmp=document.createElement('canvas'); tmp.width=dest; tmp.height=dest; cv.imshow(tmp,dst);
+    ctxPreview.clearRect(0,0,dest,dest); ctxPreview.drawImage(tmp,0,0); drawGrid();
+    warpedImage=tmp;
 
     srcMat.delete(); srcTri.delete(); dstTri.delete(); M.delete(); dst.delete();
     updateStatus('Brett entzerrt. Prüfe das Gitternetz.');
   }catch(e){ updateStatus('Entzerren fehlgeschlagen: '+e, true); }
 }
 
-function drawGrid(){
-  if(!toggleGrid.checked) return;
-  const s = warpPreview.width;
-  ctxPreview.save();
-  ctxPreview.strokeStyle = 'rgba(255,255,255,.5)';
-  ctxPreview.lineWidth = 1;
-  for(let i=1;i<8;i++){
-    const x = Math.round((s/8)*i);
-    ctxPreview.beginPath(); ctxPreview.moveTo(x,0); ctxPreview.lineTo(x,s); ctxPreview.stroke();
-    ctxPreview.beginPath(); ctxPreview.moveTo(0,x); ctxPreview.lineTo(s,x); ctxPreview.stroke();
-  }
-  ctxPreview.restore();
-}
-
-/* ========= Events ========= */
-btnStart.addEventListener('click', startStream);
+/* ======== Events ======== */
+btnStart.addEventListener('click', ()=> startStream(cameraSelect.value||undefined));
+cameraSelect.addEventListener('change', ()=> startStream(cameraSelect.value));
 btnShoot.addEventListener('click', takeShot);
+
 btnWarp.addEventListener('click', warpBoard);
 btnResetCorners.addEventListener('click', ()=>{ if(latestImage){ ctxPhoto.drawImage(latestImage,0,0); placeDefaultHandles(); } });
 btnRotL.addEventListener('click', ()=> rotatePhoto(-90));
@@ -321,6 +323,8 @@ btnAutoHough.addEventListener('click', autoFindCornersHough);
 btnSnapRect.addEventListener('click', snapToOrthogonal);
 toggleGrid.addEventListener('change', ()=>{ if(warpedImage){ ctxPreview.drawImage(warpedImage,0,0); drawGrid(); } });
 
+/* Init */
+if ('mediaDevices' in navigator){ listCameras(); }
 </script>
 </body>
 </html>
