@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Schachbrett fotografieren & entzerren</title>
   <style>
-    :root { --bg:#0b1020; --panel:#0f172a; --text:#e5e7eb; --muted:#94a3b8; --ring:#ffffff; }
+    :root { --bg:#0b1020; --panel:#0f172a; --text:#e5e7eb; --muted:#94a3b8; }
     * { box-sizing: border-box; }
     body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; background:#0b1020; color:var(--text); }
     header { padding:12px 14px; background:#111827; font-weight:700; }
@@ -14,8 +14,8 @@
     .hd    { padding:10px 12px; border-bottom:1px solid #1f2937; font-weight:700; background:#0d1428; }
     .bd    { padding:12px; }
 
-    /* Kamera-Preview mit Shutter */
-    .video-wrap { position:relative; aspect-ratio:1/1; border-radius:12px; overflow:hidden; background:#000; }
+    /* Kamera-Preview */
+    .video-wrap { position:relative; aspect-ratio:1/1; border-radius:12px; overflow:hidden; background:#000; cursor:pointer; }
     video { width:100%; height:100%; display:block; object-fit:cover; background:#000; }
     #overlay { position:absolute; inset:0; pointer-events:none; border:2px dashed rgba(255,255,255,.25); }
     #overlay .hline, #overlay .vline { position:absolute; background:rgba(255,255,255,.18); }
@@ -195,7 +195,7 @@ handles.forEach(h=>{
   window.addEventListener('touchend', ()=> dragging=false);
 });
 
-/* ===== Kamera (bewährtes Setup) ===== */
+/* ===== Kamera (bewährtes Setup, keine starre aspectRatio) ===== */
 async function startStream(deviceId){
   if(!navigator.mediaDevices?.getUserMedia){ updateStatus('Browser unterstützt keinen Kamerazugriff.', true); return; }
   video.setAttribute('playsinline',''); video.muted=true;
@@ -223,7 +223,7 @@ async function startStream(deviceId){
   updateStatus(`Kamera-Start fehlgeschlagen: ${last?.name||''} ${last?.message||''}`, true);
 }
 
-/* ===== Foto: Tap-to-Shutter + Button ===== */
+/* ===== Foto: Tap-to-Shoot + Buttons ===== */
 function takeShot(){
   if(!video.videoWidth){ updateStatus('Video noch nicht bereit.', true); return; }
   const vw=video.videoWidth, vh=video.videoHeight;
@@ -240,15 +240,23 @@ function takeShot(){
   updateStatus('Foto aufgenommen. Setze die vier Ecken exakt an die Brett-Außenkanten.');
 }
 
-/* Tap-to-shoot: Video-Overlay & Shutter-Button */
-['click','touchend'].forEach(ev=>{
-  videoWrap.addEventListener(ev, (e)=>{ // nicht auslösen, wenn auf UI-Buttons geklickt
-    if (e.target === btnShutter || e.target.tagName==='BUTTON' || e.target === cameraSelect) return;
-    takeShot();
-  }, {passive:true});
-});
-btnShutter.addEventListener('click', takeShot);
-btnShoot.addEventListener('click', takeShot);
+/* Robuster Tap-Handler (pointerup/click/touchend) */
+function isUIEvent(e){ const t=e.target; return !!(t.closest('button,select,label,input')); }
+let shooting=false;
+async function shootOnce(e){
+  if (e) { if (e.cancelable) e.preventDefault(); e.stopPropagation(); if (isUIEvent(e)) return; }
+  if (shooting) return; shooting=true;
+  try { takeShot(); } finally { shooting=false; }
+}
+/* Direkt aufs Video (zuverlässig auf iOS/Android) */
+video.addEventListener('pointerup', shootOnce, {passive:false});
+video.addEventListener('click',     shootOnce, {passive:false});
+video.addEventListener('touchend',  shootOnce, {passive:false});
+/* Shutter-Button */
+btnShutter.addEventListener('pointerup', shootOnce, {passive:false});
+btnShutter.addEventListener('click',     shootOnce, {passive:false});
+/* Zusätzlicher Button */
+btnShoot.addEventListener('click', shootOnce);
 
 /* ===== Rotieren/Reset ===== */
 function rotatePhoto(deg){
@@ -259,7 +267,7 @@ function rotatePhoto(deg){
   placeDefaultHandles();
 }
 
-/* ===== Auto-Ecken (Pro): Kontur-Viereck ODER Hough-Linien, bestes Ergebnis wählen ===== */
+/* ===== Auto-Ecken (Pro): Kontur-Viereck ODER Hough-Linien, bestes Ergebnis ===== */
 function orderQuad(pts){ // sortiert zu TL,TR,BR,BL
   pts.sort((a,b)=>a.y-b.y);
   const top=pts.slice(0,2).sort((a,b)=>a.x-b.x);
@@ -286,7 +294,7 @@ function scoreRect(quad){ // Rechtwinkligkeit + Flächenanteil
     ang(quad[2],quad[3],quad[0])
   ];
   const rightness = 1 - (angs.reduce((s,a)=>s+Math.abs(Math.PI/2-a),0)/(4*(Math.PI/2)));
-  return 0.7*areaScore + 0.3*rightness;
+  return 0.5*areaScore + 0.5*rightness; /* stärker auf Rechtwinkligkeit gewichtet */
 }
 function autoCornersContour(){
   const src=cv.imread(photoCanvas); let gray=new cv.Mat(); cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
@@ -297,7 +305,8 @@ function autoCornersContour(){
   let best=null, bestScore=-1;
   for(let i=0;i<contours.size();i++){
     const c=contours.get(i); const peri=cv.arcLength(c,true);
-    let approx=new cv.Mat(); cv.approxPolyDP(c,approx,0.02*peri,true);
+    let approx=new cv.Mat();
+    cv.approxPolyDP(c, approx, 0.015*peri, true); // schärfer als 0.02*peri
     if(approx.rows===4){
       const pts=[]; for(let j=0;j<4;j++){ const p=approx.intPtr(j,0); pts.push({x:p[0],y:p[1]}); }
       const quad=orderQuad(pts); const sc=scoreRect(quad);
@@ -312,7 +321,8 @@ function autoCornersHough(){
   const src=cv.imread(photoCanvas); let gray=new cv.Mat(); cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
   cv.GaussianBlur(gray,gray,new cv.Size(3,3),0,0);
   let edges=new cv.Mat(); cv.Canny(gray,edges,60,180);
-  let lines=new cv.Mat(); cv.HoughLinesP(edges,lines,1,Math.PI/180,70,80,10);
+  let lines=new cv.Mat();
+  cv.HoughLinesP(edges, lines, 1, Math.PI/180, 80, 100, 12); // schärfere Parameter
   let vertical=[], horizontal=[];
   for(let i=0;i<lines.rows;i++){
     const [x1,y1,x2,y2]=lines.intPtr(i,0);
@@ -321,10 +331,10 @@ function autoCornersHough(){
     else if(Math.abs(ang-90)<20) vertical.push([x1,y1,x2,y2]);
   }
   const pick=(arr,fn)=>arr.reduce((a,b)=> fn(a,b)?b:a, arr[0]);
-  const left = vertical.length?  pick(vertical,(a,b)=>Math.min(b[0],b[2])<Math.min(a[0],a[2])) : null;
-  const right= vertical.length?  pick(vertical,(a,b)=>Math.max(b[0],b[2])>Math.max(a[0],a[2])) : null;
-  const top  = horizontal.length? pick(horizontal,(a,b)=>Math.min(b[1],b[3])<Math.min(a[1],a[3])) : null;
-  const bottom=horizontal.length? pick(horizontal,(a,b)=>Math.max(b[1],b[3])>Math.max(a[1],a[3])) : null;
+  const left  = vertical.length?  pick(vertical,(a,b)=>Math.min(b[0],b[2])<Math.min(a[0],a[2])) : null;
+  const right = vertical.length?  pick(vertical,(a,b)=>Math.max(b[0],b[2])>Math.max(a[0],a[2])) : null;
+  const top   = horizontal.length? pick(horizontal,(a,b)=>Math.min(b[1],b[3])<Math.min(a[1],a[3])) : null;
+  const bottom= horizontal.length? pick(horizontal,(a,b)=>Math.max(b[1],b[3])>Math.max(a[1],a[3])) : null;
   const inter=(l1,l2)=>{ if(!l1||!l2) return null; const [x1,y1,x2,y2]=l1,[x3,y3,x4,y4]=l2;
     const den=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4); if(!den) return null;
     const px=((x1*y2-y1*x2)*(x3-x4)-(x1-x2)*(x3*y4-y3*x4))/den;
@@ -405,16 +415,6 @@ btnWarp.addEventListener('click', warpBoard);
 btnResetCorners.addEventListener('click', ()=>{ if(latestImage){ ctxPhoto.drawImage(latestImage,0,0); placeDefaultHandles(); } });
 btnRotL.addEventListener('click', ()=> rotatePhoto(-90));
 btnRotR.addEventListener('click', ()=> rotatePhoto(90));
-
-const guard = (fn)=> (e)=>{ // einfache Doppel-Tap/Drag-Guard
-  if (e.type==='touchend' && e.touches && e.touches.length>0) return;
-  fn();
-};
-btnShutter.addEventListener('click', guard(takeShot));
-btnShoot.addEventListener('click', guard(takeShot));
-videoWrap.addEventListener('click', (e)=>{ if (e.target.tagName!=='BUTTON' && e.target!==cameraSelect) takeShot(); });
-
-toggleGrid.addEventListener('change', ()=>{ if(warpedImage){ ctxPreview.drawImage(warpedImage,0,0); drawGrid(); } });
 
 /* Init */
 if ('mediaDevices' in navigator){ listCameras(); }
