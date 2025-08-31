@@ -1,4 +1,5 @@
 <!doctype html>
+
 <html lang="de">
 <head>
   <meta charset="utf-8" />
@@ -48,153 +49,47 @@ const btnShoot=document.getElementById('btnShoot');
 const photoCanvas=document.getElementById('photoCanvas');
 const ctxPhoto=photoCanvas.getContext('2d');
 const statusEl=document.getElementById('status');
+// Diagnose: Berechtigungs-Status (falls unterstützt)
+(async()=>{try{ if(navigator.permissions){ const st = await navigator.permissions.query({name:'camera'}); updateStatus('Kamerarechte: '+st.state+' — tippe "Kamera Start"'); st.onchange=()=>updateStatus('Kamerarechte: '+st.state); }}catch{}})();
 const handlesDiv=document.getElementById('handles');
-let currentStream=null, latestImage=null;
+let currentStream=null, latestImage=null;function updateStatus(msg){statusEl.textContent=msg;}
 
-function updateStatus(msg){statusEl.textContent=msg;}
+async function startStream(){ if (!('mediaDevices' in navigator) || !navigator.mediaDevices.getUserMedia){ updateStatus('Dein Browser unterstützt keinen Kamerazugriff.'); return; } // iOS: sicherheitshalber nochmals inline+muted setzen video.setAttribute('playsinline',''); video.setAttribute('muted','');
 
-btnStart.onclick=async()=>{
-  try{
-    currentStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:1280},aspectRatio:1},audio:false});
-    video.srcObject=currentStream; await video.play();
-    updateStatus('Kamera aktiv');
-  }catch(e){updateStatus('Fehler: '+e.message);}
+// Vorherigen Stream stoppen if (currentStream){ currentStream.getTracks().forEach(t=>t.stop()); currentStream=null; }
+
+const attempts = [ { audio:false, video:{ facingMode:{ideal:'environment'}, aspectRatio:{ideal:1}, width:{ideal:1920}, height:{ideal:1920} } }, { audio:false, video:{ facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080} } }, { audio:false, video:true } ];
+
+let lastErr=null; for (const c of attempts){ try{ const s = await navigator.mediaDevices.getUserMedia(c); currentStream = s; video.srcObject = s; await video.play(); const caps = s.getVideoTracks()[0].getSettings?.()||{}; updateStatus('Kamera aktiv ('+(caps.width||'?')+'×'+(caps.height||'?')+')'); return; }catch(e){ lastErr=e; console.warn('getUserMedia failed with', c, e); } } updateStatus('Kamera konnte nicht gestartet werden: '+(lastErr?.name||'Unbekannt')+' — '+(lastErr?.message||'')); }
+
+btnStart.onclick = startStream;
+
+btnShoot.onclick=()=>{ if(!video.videoWidth){updateStatus('Video noch nicht bereit');return;} const side=Math.min(video.videoWidth, video.videoHeight); const sx=(video.videoWidth-side)/2, sy=(video.videoHeight-side)/2; photoCanvas.width=side; photoCanvas.height=side; ctxPhoto.drawImage(video,sx,sy,side,side,0,0,side,side); latestImage=new Image(); latestImage.src=photoCanvas.toDataURL(); placeHandles(); };
+
+function placeHandles(){ handlesDiv.innerHTML=''; const pos=[[10,10],[photoCanvas.width-30,10],[photoCanvas.width-30,photoCanvas.height-30],[10,photoCanvas.height-30]]; pos.forEach((p,i)=>{ const h=document.createElement('div'); h.className='handle'; h.style.left=p[0]+'px'; h.style.top=p[1]+'px'; h.dataset.i=i; handlesDiv.appendChild(h); }); handlesDiv.style.position='relative'; handlesDiv.style.width=photoCanvas.width+'px'; handlesDiv.style.height=photoCanvas.height+'px'; handlesDiv.style.margin='auto'; }
+
+// Drag logic let drag=null; handlesDiv.onmousedown=e=>{if(e.target.classList.contains('handle')){drag=e.target;}}; window.onmousemove=e=>{if(drag){drag.style.left=(e.offsetX-11)+'px'; drag.style.top=(e.offsetY-11)+'px';}}; window.onmouseup=()=>drag=null;
+
+// Reset corners btnResetCorners.onclick=()=>{if(latestImage){ctxPhoto.drawImage(latestImage,0,0); placeHandles();}}; // Rotate function rotatePhoto(deg){if(!latestImage)return;const c=document.createElement('canvas');c.width=photoCanvas.width;c.height=photoCanvas.height;const ctx=c.getContext('2d');ctx.translate(c.width/2,c.height/2);ctx.rotate(deg*Math.PI/180);ctx.drawImage(photoCanvas,-c.width/2,-c.height/2);ctxPhoto.clearRect(0,0,photoCanvas.width,photoCanvas.height);ctxPhoto.drawImage(c,0,0);} btnRotL.onclick=()=>rotatePhoto(-90); btnRotR.onclick=()=>rotatePhoto(90);
+
+// Auto corner detection (Hough) btnAutoCorners.onclick=()=>{ try{ let src=cv.imread(photoCanvas); let gray=new cv.Mat(); cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY); cv.GaussianBlur(gray,gray,new cv.Size(5,5),0); let edges=new cv.Mat(); cv.Canny(gray,edges,50,150); let lines=new cv.Mat(); cv.HoughLinesP(edges,lines,1,Math.PI/180,80,100,10); if(lines.rows>0){ updateStatus('Linien gefunden: '+lines.rows+' (prüfe manuell)'); } src.delete(); gray.delete(); edges.delete(); lines.delete(); }catch(e){updateStatus('Auto-Kanten nicht verfügbar: '+e);}
 };
 
-btnShoot.onclick=()=>{
-  if(!video.videoWidth){updateStatus('Video noch nicht bereit');return;}
-  const side=Math.min(video.videoWidth, video.videoHeight);
-  const sx=(video.videoWidth-side)/2, sy=(video.videoHeight-side)/2;
-  photoCanvas.width=side; photoCanvas.height=side;
-  ctxPhoto.drawImage(video,sx,sy,side,side,0,0,side,side);
-  latestImage=new Image(); latestImage.src=photoCanvas.toDataURL();
-  placeHandles();
-};
+// Warp btnWarp.onclick=()=>{ try{ const hs=[...handlesDiv.querySelectorAll('.handle')].map(h=>({x:parseInt(h.style.left),y:parseInt(h.style.top)})); const src=cv.imread(photoCanvas); const dstSize=800; const srcTri=cv.matFromArray(4,1,cv.CV_32FC2,new Float32Array([hs[0].x,hs[0].y,hs[1].x,hs[1].y,hs[2].x,hs[2].y,hs[3].x,hs[3].y])); const dstTri=cv.matFromArray(4,1,cv.CV_32FC2,new Float32Array([0,0,dstSize,0,dstSize,dstSize,0,dstSize])); const M=cv.getPerspectiveTransform(srcTri,dstTri); let dst=new cv.Mat(); cv.warpPerspective(src,dst,M,new cv.Size(dstSize,dstSize)); photoCanvas.width=dstSize; photoCanvas.height=dstSize; cv.imshow(photoCanvas,dst); src.delete(); srcTri.delete(); dstTri.delete(); M.delete(); dst.delete(); updateStatus('Entzerrt.'); }catch(e){updateStatus('Fehler beim Entzerren: '+e);} };
 
-function placeHandles(){
-  handlesDiv.innerHTML='';
-  const pos=[[10,10],[photoCanvas.width-30,10],[photoCanvas.width-30,photoCanvas.height-30],[10,photoCanvas.height-30]];
-  pos.forEach((p,i)=>{
-    const h=document.createElement('div'); h.className='handle'; h.style.left=p[0]+'px'; h.style.top=p[1]+'px'; h.dataset.i=i;
-    handlesDiv.appendChild(h);
-  });
-  handlesDiv.style.position='relative'; handlesDiv.style.width=photoCanvas.width+'px';
-  handlesDiv.style.height=photoCanvas.height+'px'; handlesDiv.style.margin='auto';
-}
+// === Zusätzliche Pro-Hilfen: Hough-Kanten, Snap 90°, Gitternetz === const btnAutoHough = document.getElementById('btnAutoHough'); const btnSnapRect = document.getElementById('btnSnapRect'); const toggleGrid = document.getElementById('toggleGrid'); const warpPreview = document.getElementById('warpPreview'); const ctxPreview = warpPreview.getContext('2d');
 
-// Drag logic
-let drag=null; handlesDiv.onmousedown=e=>{if(e.target.classList.contains('handle')){drag=e.target;}};
-window.onmousemove=e=>{if(drag){drag.style.left=(e.offsetX-11)+'px'; drag.style.top=(e.offsetY-11)+'px';}};
-window.onmouseup=()=>drag=null;
+function drawGridPreview(){ if(!warpedImage) return; warpPreview.width = warpedImage.width; warpPreview.height = warpedImage.height; ctxPreview.clearRect(0,0,warpPreview.width, warpPreview.height); ctxPreview.drawImage(warpedImage, 0, 0); if(!toggleGrid?.checked) return; const s = warpPreview.width; ctxPreview.lineWidth = 1; ctxPreview.globalAlpha = 0.7; for(let i=1;i<8;i++){ const x = Math.round((s/8)*i); const y = x; ctxPreview.beginPath(); ctxPreview.moveTo(x,0); ctxPreview.lineTo(x,s); ctxPreview.stroke(); ctxPreview.beginPath(); ctxPreview.moveTo(0,y); ctxPreview.lineTo(s,y); ctxPreview.stroke(); } ctxPreview.globalAlpha = 1; }
 
-// Reset corners
-btnResetCorners.onclick=()=>{if(latestImage){ctxPhoto.drawImage(latestImage,0,0); placeHandles();}};
-// Rotate
-function rotatePhoto(deg){if(!latestImage)return;const c=document.createElement('canvas');c.width=photoCanvas.width;c.height=photoCanvas.height;const ctx=c.getContext('2d');ctx.translate(c.width/2,c.height/2);ctx.rotate(deg*Math.PI/180);ctx.drawImage(photoCanvas,-c.width/2,-c.height/2);ctxPhoto.clearRect(0,0,photoCanvas.width,photoCanvas.height);ctxPhoto.drawImage(c,0,0);} 
-btnRotL.onclick=()=>rotatePhoto(-90);
-btnRotR.onclick=()=>rotatePhoto(90);
+function updatePreviewAfterWarp(){ drawGridPreview(); }
 
-// Auto corner detection (Hough)
-btnAutoCorners.onclick=()=>{
-  try{
-    let src=cv.imread(photoCanvas); let gray=new cv.Mat(); cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
-    cv.GaussianBlur(gray,gray,new cv.Size(5,5),0);
-    let edges=new cv.Mat(); cv.Canny(gray,edges,50,150);
-    let lines=new cv.Mat(); cv.HoughLinesP(edges,lines,1,Math.PI/180,80,100,10);
-    if(lines.rows>0){ updateStatus('Linien gefunden: '+lines.rows+' (prüfe manuell)'); }
-    src.delete(); gray.delete(); edges.delete(); lines.delete();
-  }catch(e){updateStatus('Auto-Kanten nicht verfügbar: '+e);}  
-};
+// Hook: nach erfolgreichem Warp Preview zeichnen const _origRender = typeof renderBoardFromImageOrImproved==='function'? renderBoardFromImageOrImproved : null; window.renderBoardFromImageOrImproved = function(img){ if(_origRender) _origRender(img); updatePreviewAfterWarp(); };
 
-// Warp
-btnWarp.onclick=()=>{
-  try{
-    const hs=[...handlesDiv.querySelectorAll('.handle')].map(h=>({x:parseInt(h.style.left),y:parseInt(h.style.top)}));
-    const src=cv.imread(photoCanvas);
-    const dstSize=800;
-    const srcTri=cv.matFromArray(4,1,cv.CV_32FC2,new Float32Array([hs[0].x,hs[0].y,hs[1].x,hs[1].y,hs[2].x,hs[2].y,hs[3].x,hs[3].y]));
-    const dstTri=cv.matFromArray(4,1,cv.CV_32FC2,new Float32Array([0,0,dstSize,0,dstSize,dstSize,0,dstSize]));
-    const M=cv.getPerspectiveTransform(srcTri,dstTri);
-    let dst=new cv.Mat(); cv.warpPerspective(src,dst,M,new cv.Size(dstSize,dstSize));
-    photoCanvas.width=dstSize; photoCanvas.height=dstSize; cv.imshow(photoCanvas,dst);
-    src.delete(); srcTri.delete(); dstTri.delete(); M.delete(); dst.delete();
-    updateStatus('Entzerrt.');
-  }catch(e){updateStatus('Fehler beim Entzerren: '+e);}
-};
+// Kantenbasierte Eckenerkennung (Hough) function autoFindCornersHough(){ try{ const src = cv.imread(photoCanvas); let gray=new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY); cv.GaussianBlur(gray, gray, new cv.Size(3,3), 0, 0); let edges=new cv.Mat(); cv.Canny(gray, edges, 60, 180); let lines = new cv.Mat(); cv.HoughLinesP(edges, lines, 1, Math.PI/180, 60, 60, 10); // Split roughly into near-vertical and near-horizontal let vertical=[], horizontal=[]; for(let i=0;i<lines.rows;i++){ const [x1,y1,x2,y2] = lines.intPtr(i,0); const dx = x2-x1, dy = y2-y1; const ang = Math.atan2(dy,dx); const deg = Math.abs(ang180/Math.PI); if(deg<20 || deg>160) horizontal.push([x1,y1,x2,y2]); else if(Math.abs(deg-90)<20) vertical.push([x1,y1,x2,y2]); } // Get extreme lines const left = vertical.reduce((a,b)=> (Math.min(b[0],b[2]) < (a?Math.min(a[0],a[2]):1e9))?b:a, null); const right = vertical.reduce((a,b)=> (Math.max(b[0],b[2]) > (a?Math.max(a[0],a[2]):-1e9))?b:a, null); const top = horizontal.reduce((a,b)=> (Math.min(b[1],b[3]) < (a?Math.min(a[1],a[3]):1e9))?b:a, null); const bottom = horizontal.reduce((a,b)=> (Math.max(b[1],b[3]) > (a?Math.max(a[1],a[3]):-1e9))?b:a, null); const inter = (l1,l2)=>{ const [x1,y1,x2,y2]=l1,[x3,y3,x4,y4]=l2; const den=(x1-x2)(y3-y4)-(y1-y2)(x3-x4); if(!den) return null; const px=((x1y2 - y1x2)(x3-x4)-(x1-x2)(x3y4-y3x4))/den; const py=((x1y2 - y1x2)(y3-y4)-(y1-y2)(x3y4-y3x4))/den; return {x:px,y:py}; }; if(left&&right&&top&&bottom){ const TL = inter(top,left), TR = inter(top,right), BR = inter(bottom,right), BL = inter(bottom,left); const r=photoCanvas.getBoundingClientRect(); const scaleX=r.width/photoCanvas.width, scaleY=r.height/photoCanvas.height; [TL,TR,BR,BL].forEach((p,i)=>{ if(!p) return; const h=document.getElementById('h'+i); h.style.left=(p.xscaleX)+'px'; h.style.top=(p.y*scaleY)+'px'; }); updateStatus('Ecken per Kanten erkannt. Bitte kurz prüfen.'); } else { updateStatus('Kanten zu uneindeutig. Bitte manuell oder „Kontur“-Erkennung verwenden.', true); } src.delete(); gray.delete(); edges.delete(); lines.delete(); }catch(e){ console.warn(e); updateStatus('Hough-Erkennung nicht verfügbar (lädt OpenCV noch?).', true); } }
 
-  // === Zusätzliche Pro-Hilfen: Hough-Kanten, Snap 90°, Gitternetz ===
-  const btnAutoHough = document.getElementById('btnAutoHough');
-  const btnSnapRect = document.getElementById('btnSnapRect');
-  const toggleGrid = document.getElementById('toggleGrid');
-  const warpPreview = document.getElementById('warpPreview');
-  const ctxPreview = warpPreview.getContext('2d');
+// Snap 90° – projiziere auf achsenparalleles Rechteck mit gleichem Mittelpunkt function snapToOrthogonal(){ const pts = getHandlePoints(); const cx = (pts[0].x+pts[1].x+pts[2].x+pts[3].x)/4; const cy=(pts[0].y+pts[1].y+pts[2].y+pts[3].y)/4; // Breite/Höhe aus aktuellen Abständen mitteln const w = (Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y) + Math.hypot(pts[2].x-pts[3].x, pts[2].y-pts[3].y)) / 2; const h = (Math.hypot(pts[3].x-pts[0].x, pts[3].y-pts[0].y) + Math.hypot(pts[2].x-pts[1].x, pts[2].y-pts[1].y)) / 2; const halfW=w/2, halfH=h/2; const r=photoCanvas.getBoundingClientRect(); const sx=r.width/photoCanvas.width, sy=r.height/photoCanvas.height; const target=[ {x:cx-halfW, y:cy-halfH}, {x:cx+halfW, y:cy-halfH}, {x:cx+halfW, y:cy+halfH}, {x:cx-halfW, y:cy+halfH} ]; target.forEach((p,i)=>{ const h=document.getElementById('h'+i); h.style.left=(p.xsx)+'px'; h.style.top=(p.ysy)+'px'; }); updateStatus('Auf 90°-Rechteck eingerastet.'); }
 
-  function drawGridPreview(){
-    if(!warpedImage) return; warpPreview.width = warpedImage.width; warpPreview.height = warpedImage.height;
-    ctxPreview.clearRect(0,0,warpPreview.width, warpPreview.height);
-    ctxPreview.drawImage(warpedImage, 0, 0);
-    if(!toggleGrid?.checked) return;
-    const s = warpPreview.width; ctxPreview.lineWidth = 1; ctxPreview.globalAlpha = 0.7;
-    for(let i=1;i<8;i++){ const x = Math.round((s/8)*i); const y = x; ctxPreview.beginPath(); ctxPreview.moveTo(x,0); ctxPreview.lineTo(x,s); ctxPreview.stroke(); ctxPreview.beginPath(); ctxPreview.moveTo(0,y); ctxPreview.lineTo(s,y); ctxPreview.stroke(); }
-    ctxPreview.globalAlpha = 1;
-  }
+// Events if(btnAutoHough) btnAutoHough.addEventListener('click', autoFindCornersHough); if(btnSnapRect) btnSnapRect.addEventListener('click', snapToOrthogonal); if(toggleGrid) toggleGrid.addEventListener('change', drawGridPreview); </script>
 
-  function updatePreviewAfterWarp(){ drawGridPreview(); }
-
-  // Hook: nach erfolgreichem Warp Preview zeichnen
-  const _origRender = typeof renderBoardFromImageOrImproved==='function'? renderBoardFromImageOrImproved : null;
-  window.renderBoardFromImageOrImproved = function(img){ if(_origRender) _origRender(img); updatePreviewAfterWarp(); };
-
-  // Kantenbasierte Eckenerkennung (Hough)
-  function autoFindCornersHough(){
-    try{
-      const src = cv.imread(photoCanvas); let gray=new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-      cv.GaussianBlur(gray, gray, new cv.Size(3,3), 0, 0);
-      let edges=new cv.Mat(); cv.Canny(gray, edges, 60, 180);
-      let lines = new cv.Mat(); cv.HoughLinesP(edges, lines, 1, Math.PI/180, 60, 60, 10);
-      // Split roughly into near-vertical and near-horizontal
-      let vertical=[], horizontal=[];
-      for(let i=0;i<lines.rows;i++){
-        const [x1,y1,x2,y2] = lines.intPtr(i,0);
-        const dx = x2-x1, dy = y2-y1; const ang = Math.atan2(dy,dx);
-        const deg = Math.abs(ang*180/Math.PI);
-        if(deg<20 || deg>160) horizontal.push([x1,y1,x2,y2]);
-        else if(Math.abs(deg-90)<20) vertical.push([x1,y1,x2,y2]);
-      }
-      // Get extreme lines
-      const left = vertical.reduce((a,b)=> (Math.min(b[0],b[2]) < (a?Math.min(a[0],a[2]):1e9))?b:a, null);
-      const right = vertical.reduce((a,b)=> (Math.max(b[0],b[2]) > (a?Math.max(a[0],a[2]):-1e9))?b:a, null);
-      const top = horizontal.reduce((a,b)=> (Math.min(b[1],b[3]) < (a?Math.min(a[1],a[3]):1e9))?b:a, null);
-      const bottom = horizontal.reduce((a,b)=> (Math.max(b[1],b[3]) > (a?Math.max(a[1],a[3]):-1e9))?b:a, null);
-      const inter = (l1,l2)=>{ const [x1,y1,x2,y2]=l1,[x3,y3,x4,y4]=l2; const den=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4); if(!den) return null; const px=((x1*y2 - y1*x2)*(x3-x4)-(x1-x2)*(x3*y4-y3*x4))/den; const py=((x1*y2 - y1*x2)*(y3-y4)-(y1-y2)*(x3*y4-y3*x4))/den; return {x:px,y:py}; };
-      if(left&&right&&top&&bottom){
-        const TL = inter(top,left), TR = inter(top,right), BR = inter(bottom,right), BL = inter(bottom,left);
-        const r=photoCanvas.getBoundingClientRect(); const scaleX=r.width/photoCanvas.width, scaleY=r.height/photoCanvas.height;
-        [TL,TR,BR,BL].forEach((p,i)=>{ if(!p) return; const h=document.getElementById('h'+i); h.style.left=(p.x*scaleX)+'px'; h.style.top=(p.y*scaleY)+'px'; });
-        updateStatus('Ecken per Kanten erkannt. Bitte kurz prüfen.');
-      } else {
-        updateStatus('Kanten zu uneindeutig. Bitte manuell oder „Kontur“-Erkennung verwenden.', true);
-      }
-      src.delete(); gray.delete(); edges.delete(); lines.delete();
-    }catch(e){ console.warn(e); updateStatus('Hough-Erkennung nicht verfügbar (lädt OpenCV noch?).', true); }
-  }
-
-  // Snap 90° – projiziere auf achsenparalleles Rechteck mit gleichem Mittelpunkt
-  function snapToOrthogonal(){
-    const pts = getHandlePoints(); const cx = (pts[0].x+pts[1].x+pts[2].x+pts[3].x)/4; const cy=(pts[0].y+pts[1].y+pts[2].y+pts[3].y)/4;
-    // Breite/Höhe aus aktuellen Abständen mitteln
-    const w = (Math.hypot(pts[1].x-pts[0].x, pts[1].y-pts[0].y) + Math.hypot(pts[2].x-pts[3].x, pts[2].y-pts[3].y)) / 2;
-    const h = (Math.hypot(pts[3].x-pts[0].x, pts[3].y-pts[0].y) + Math.hypot(pts[2].x-pts[1].x, pts[2].y-pts[1].y)) / 2;
-    const halfW=w/2, halfH=h/2; const r=photoCanvas.getBoundingClientRect(); const sx=r.width/photoCanvas.width, sy=r.height/photoCanvas.height;
-    const target=[ {x:cx-halfW, y:cy-halfH}, {x:cx+halfW, y:cy-halfH}, {x:cx+halfW, y:cy+halfH}, {x:cx-halfW, y:cy+halfH} ];
-    target.forEach((p,i)=>{ const h=document.getElementById('h'+i); h.style.left=(p.x*sx)+'px'; h.style.top=(p.y*sy)+'px'; });
-    updateStatus('Auf 90°-Rechteck eingerastet.');
-  }
-
-  // Events
-  if(btnAutoHough) btnAutoHough.addEventListener('click', autoFindCornersHough);
-  if(btnSnapRect) btnSnapRect.addEventListener('click', snapToOrthogonal);
-  if(toggleGrid) toggleGrid.addEventListener('change', drawGridPreview);
-</script>
 </body>
 </html>
