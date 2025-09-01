@@ -24,7 +24,7 @@
     #overlay .hline{left:0;right:0;height:1px;top:50%}
     #overlay .vline{top:0;bottom:0;width:1px;left:50%}
 
-    /* Weißer Ring nur Optik */
+    /* Weißer Ring nur Optik (blockiert keine Klicks) */
     .shutter{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:72px;height:72px;border-radius:50%;
       background:transparent;border:none;padding:0;display:grid;place-items:center;pointer-events:none}
     .shutter-inner{width:72px;height:72px;border-radius:50%;border:5px solid rgba(255,255,255,.95);box-shadow:0 6px 24px rgba(0,0,0,.45);background:transparent;pointer-events:none}
@@ -316,50 +316,74 @@ function scoreRect(quad){ if(!quad||quad.length!==4) return -1; const area=Math.
 function autoCornersContour(){ const src=cv.imread(photoCanvas); let gray=new cv.Mat(); cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY); cv.GaussianBlur(gray,gray,new cv.Size(5,5),0); let edges=new cv.Mat(); cv.Canny(gray,edges,60,180); let contours=new cv.MatVector(), hier=new cv.Mat(); cv.findContours(edges,contours,hier,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE); let best=null,bestScore=-1; for(let i=0;i<contours.size();i++){ const c=contours.get(i); const peri=cv.arcLength(c,true); let approx=new cv.Mat(); cv.approxPolyDP(c,approx,0.015*peri,true); if(approx.rows===4){ const pts=[]; for(let j=0;j<4;j++){ const p=approx.intPtr(j,0); pts.push({x:p[0],y:p[1]}); } const quad=orderQuad(pts); const sc=scoreRect(quad); if(sc>bestScore){ best=quad; bestScore=sc; } } approx.delete(); } src.delete(); gray.delete(); edges.delete(); contours.delete(); hier.delete(); return best; }
 function autoCornersHough(){ const src=cv.imread(photoCanvas); let gray=new cv.Mat(); cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY); cv.GaussianBlur(gray,gray,new cv.Size(3,3),0,0); let edges=new cv.Mat(); cv.Canny(gray,edges,60,180); let lines=new cv.Mat(); cv.HoughLinesP(edges,lines,1,Math.PI/180,80,100,12); let vertical=[],horizontal=[]; for(let i=0;i<lines.rows;i++){ const [x1,y1,x2,y2]=lines.intPtr(i,0); const ang=Math.abs(Math.atan2(y2-y1,x2-x1)*180/Math.PI); if(ang<20||ang>160) horizontal.push([x1,y1,x2,y2]); else if(Math.abs(ang-90)<20) vertical.push([x1,y1,x2,y2]); } const pick=(arr,fn)=>arr.reduce((a,b)=> fn(a,b)?b:a, arr[0]); const left  = vertical.length?  pick(vertical,(a,b)=>Math.min(b[0],b[2])<Math.min(a[0],a[2])) : null; const right = vertical.length?  pick(vertical,(a,b)=>Math.max(b[0],b[2])>Math.max(a[0],a[2])) : null; const top   = horizontal.length? pick(horizontal,(a,b)=>Math.min(b[1],b[3])<Math.min(a[1],a[3])) : null; const bottom= horizontal.length? pick(horizontal,(a,b)=>Math.max(b[1],b[3])>Math.max(a[1],a[3])) : null; const inter=(l1,l2)=>{ if(!l1||!l2) return null; const [x1,y1,x2,y2]=l1,[x3,y3,x4,y4]=l2; const den=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4); if(!den) return null; const px=((x1*y2-y1*x2)*(x3-x4)-(x1-x2)*(x3*y4-y3*x4))/den; const py=((x1*y2-y1*x2)*(y3-y4)-(y1-y2)*(x3*y4-y3*x4))/den; return {x:px,y:py}; }; let quad=null; if(left&&right&&top&&bottom){ quad=orderQuad([inter(top,left),inter(top,right),inter(bottom,right),inter(bottom,left)].filter(Boolean)); } src.delete(); gray.delete(); edges.delete(); lines.delete(); return quad; }
 
-/* ===== Homographien & Grid-Detection im Warp ===== */
+/* ===== Homographien & präzise Grid-Detection im Warp ===== */
 function applyHomography(pt, H) {
   const x=pt.x, y=pt.y, w=H[6]*x + H[7]*y + H[8];
   return { x:(H[0]*x + H[1]*y + H[2]) / w, y:(H[3]*x + H[4]*y + H[5]) / w };
 }
 function matToArray33(M){ const a=M.data64F||M.data32F; return [a[0],a[1],a[2],a[3],a[4],a[5],a[6],a[7],a[8]]; }
 
-/* Robuste Gitterlinien-Suche (arbeitet auf beliebigem Canvas, z.B. 800×800) */
+/* NEU: präzise, robuste Innenlinien (Argmax um 100/700 px, Subpixel) */
 function findGridLinesInWarp(canvas){
-  let src=cv.imread(canvas);
-  let gray=new cv.Mat(); cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY); cv.GaussianBlur(gray,gray,new cv.Size(3,3),0,0);
+  let src = cv.imread(canvas);
+  let gray = new cv.Mat(); cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray, gray, new cv.Size(3,3), 0, 0);
 
-  let gx=new cv.Mat(), gy=new cv.Mat();
-  cv.Sobel(gray,gx,cv.CV_32F,1,0,3,1,0,cv.BORDER_DEFAULT); // vertikale Kanten
-  cv.Sobel(gray,gy,cv.CV_32F,0,1,3,1,0,cv.BORDER_DEFAULT); // horizontale Kanten
-  let ax=new cv.Mat(), ay=new cv.Mat(); cv.convertScaleAbs(gx,ax); cv.convertScaleAbs(gy,ay);
+  let gx = new cv.Mat(), gy = new cv.Mat();
+  cv.Sobel(gray, gx, cv.CV_32F, 1, 0, 3, 1, 0, cv.BORDER_DEFAULT); // vertikale Kanten
+  cv.Sobel(gray, gy, cv.CV_32F, 0, 1, 3, 1, 0, cv.BORDER_DEFAULT); // horizontale Kanten
+  let ax = new cv.Mat(), ay = new cv.Mat();
+  cv.convertScaleAbs(gx, ax); cv.convertScaleAbs(gy, ay);
 
-  const W=src.cols, H=src.rows;
-  const colSum=new Float32Array(W), rowSum=new Float32Array(H);
-  for(let x=0;x<W;x++){ let s=0; for(let y=0;y<H;y++) s+=ax.ucharPtr(y,x)[0]; colSum[x]=s; }
-  for(let y=0;y<H;y++){ let s=0; for(let x=0;x<W;x++) s+=ay.ucharPtr(y,x)[0]; rowSum[y]=s; }
+  const W = src.cols, H = src.rows; // 800x800
+  const mid = { y0: Math.floor(H*0.15), y1: Math.floor(H*0.85),
+                x0: Math.floor(W*0.15), x1: Math.floor(W*0.85) };
 
-  const smooth1D=(arr,w=9)=>{ const out=new Float32Array(arr.length), half=Math.floor(w/2);
+  const trimMedian = (vals) => {
+    vals.sort((a,b)=>a-b);
+    const n=vals.length, a=Math.floor(n*0.15), b=Math.ceil(n*0.85);
+    const s=vals.slice(a,b);
+    return s[Math.floor(s.length/2)] || 0;
+  };
+
+  const colEnergy = new Float32Array(W);
+  for (let x=0; x<W; x++){
+    const vals=[]; for (let y=mid.y0; y<mid.y1; y+=2) vals.push(ax.ucharPtr(y,x)[0]);
+    colEnergy[x]=trimMedian(vals);
+  }
+  const rowEnergy = new Float32Array(H);
+  for (let y=0; y<H; y++){
+    const vals=[]; for (let x=mid.x0; x<mid.x1; x+=2) vals.push(ay.ucharPtr(y,x)[0]);
+    rowEnergy[y]=trimMedian(vals);
+  }
+
+  const smooth=(arr,w=7)=>{ const out=new Float32Array(arr.length), half=Math.floor(w/2);
     for(let i=0;i<arr.length;i++){ let s=0,c=0; for(let k=-half;k<=half;k++){ const j=i+k; if(j<0||j>=arr.length) continue; s+=arr[j]; c++; } out[i]=s/Math.max(1,c); }
     return out; };
-  const cs=smooth1D(colSum), rs=smooth1D(rowSum);
+  const CE=smooth(colEnergy,9), RE=smooth(rowEnergy,9);
 
-  const findPeaks=(arr,minDist=60,minRel=0.25)=>{ const maxVal=Math.max(...arr), thr=maxVal*minRel; const peaks=[];
-    for(let i=1;i<arr.length-1;i++){ if(arr[i]>thr && arr[i]>=arr[i-1] && arr[i]>=arr[i+1]) peaks.push({x:i,v:arr[i]}); }
-    peaks.sort((a,b)=>b.v-a.v);
-    const kept=[]; for(const p of peaks){ if(!kept.some(q=>Math.abs(q.x-p.x)<minDist)) kept.push(p); if(kept.length>=18) break; }
-    kept.sort((a,b)=>a.x-b.x); return kept.map(p=>p.x); };
-  let vPeaks=findPeaks(cs), hPeaks=findPeaks(rs);
+  const refine=(arr,target,win=32)=>{
+    let bestI=target, bestV=-1;
+    const a=Math.max(0,target-win), b=Math.min(arr.length-1,target+win);
+    for(let i=a;i<=b;i++){ const v=arr[i]; if(v>bestV){ bestV=v; bestI=i; } }
+    if(bestI>0 && bestI<arr.length-1){
+      const y1=arr[bestI-1], y2=arr[bestI], y3=arr[bestI+1];
+      const denom=(y1-2*y2+y3);
+      if(Math.abs(denom)>1e-3){ const delta=0.5*(y1-y3)/denom; bestI+=delta; }
+    }
+    return bestI;
+  };
 
-  const snapGrid=(peaks)=>{ const out=[]; for(let k=0;k<=8;k++){ const target=k*100; let best=target, bestD=1e9;
-      for(const p of peaks){ const d=Math.abs(p-target); if(d<bestD){ bestD=d; best=p; } }
-      out.push(bestD<40?best:target);
-    } return out; };
-  const vLines=snapGrid(vPeaks), hLines=snapGrid(hPeaks);
+  const left   = refine(CE, 100, 32);
+  const right  = refine(CE, 700, 32);
+  const top    = refine(RE, 100, 32);
+  const bottom = refine(RE, 700, 32);
 
-  const left=vLines[1], right=vLines[7], top=hLines[1], bottom=hLines[7];
+  const vLines = Array.from({length:9},(_,k)=>refine(CE,k*100,32));
+  const hLines = Array.from({length:9},(_,k)=>refine(RE,k*100,32));
 
   src.delete(); gray.delete(); gx.delete(); gy.delete(); ax.delete(); ay.delete();
-  return {left,right,top,bottom, vLines, hLines};
+  return { left, right, top, bottom, vLines, hLines };
 }
 
 /* Aus äußeren Konturen -> innere Feld-Ecken bestimmen */
@@ -414,7 +438,7 @@ function drawGrid(){
   ctxPreview.clearRect(0,0,warpPreview.width,warpPreview.height);
   if (warpedImage) ctxPreview.drawImage(warpedImage,0,0);
 
-  // 1) dünnes Gitter (erwartete Positionen)
+  // dünnes Gitter (erwartete Positionen)
   if(toggleGrid.checked){
     const s=warpPreview.width;
     ctxPreview.save(); ctxPreview.strokeStyle='rgba(255,255,255,.5)'; ctxPreview.lineWidth=1;
@@ -425,28 +449,16 @@ function drawGrid(){
     ctxPreview.restore();
   }
 
-  // 2) Debug-Linien (gefunden aus aktuellem Warp)
+  // Debug-Linien (grün): gefundene k=1 & k=7
   if(toggleDebug.checked && warpedImage){
     const {left,right,top,bottom} = findGridLinesInWarp(warpedImage);
     ctxPreview.save();
-    ctxPreview.strokeStyle='rgba(16,185,129,.95)'; // grün
+    ctxPreview.strokeStyle='rgba(16,185,129,.95)';
     ctxPreview.lineWidth=2;
-
-    // vertikal
-    ctxPreview.beginPath(); ctxPreview.moveTo(left,0); ctxPreview.lineTo(left,800); ctxPreview.stroke();
+    ctxPreview.beginPath(); ctxPreview.moveTo(left,0);  ctxPreview.lineTo(left,800);  ctxPreview.stroke();
     ctxPreview.beginPath(); ctxPreview.moveTo(right,0); ctxPreview.lineTo(right,800); ctxPreview.stroke();
-    // horizontal
-    ctxPreview.beginPath(); ctxPreview.moveTo(0,top); ctxPreview.lineTo(800,top); ctxPreview.stroke();
-    ctxPreview.beginPath(); ctxPreview.moveTo(0,bottom); ctxPreview.lineTo(800,bottom); ctxPreview.stroke();
-
-    // kleine Labels
-    ctxPreview.fillStyle='rgba(16,185,129,.95)';
-    ctxPreview.font='14px system-ui';
-    ctxPreview.fillText('L', Math.max(0,left-10), 16);
-    ctxPreview.fillText('R', Math.min(800,right+4), 16);
-    ctxPreview.fillText('T', 4, Math.max(12,top-4));
-    ctxPreview.fillText('B', 4, Math.min(800,bottom+14));
-
+    ctxPreview.beginPath(); ctxPreview.moveTo(0,top);   ctxPreview.lineTo(800,top);   ctxPreview.stroke();
+    ctxPreview.beginPath(); ctxPreview.moveTo(0,bottom);ctxPreview.lineTo(800,bottom);ctxPreview.stroke();
     ctxPreview.restore();
   }
 }
@@ -470,7 +482,7 @@ function warpBoard(){
     board = predictedBoard.map(r=>r.slice());
     fenOut.value='';
 
-    drawGrid(); // zeichnet auch Debug-Linien
+    drawGrid();
     updateStatus('Brett entzerrt. Optional Regler anpassen, dann „Stellung erkennen“.');
   }catch(e){ updateStatus('Entzerren fehlgeschlagen: '+e, true); }
 }
@@ -483,16 +495,13 @@ function autoOrientWhiteBottomRight(){
   for(let i=0;i<4;i++){ const c=document.createElement('canvas'); c.width=800; c.height=800; const x=c.getContext('2d'); x.translate(400,400); x.rotate(rots[i]*Math.PI/180); x.drawImage(warpedImage,-400,-400);
     let g=cv.imread(c); cv.cvtColor(g,g,cv.COLOR_RGBA2GRAY); const s=meanBrightOfSquare(7,7,g)-meanBrightOfSquare(0,0,g); g.delete(); if(s>score){score=s;best=i;} }
   const p=ctxPreview; p.clearRect(0,0,800,800); p.save(); p.translate(400,400); p.rotate(rots[best]*Math.PI/180); p.drawImage(warpedImage,-400,-400); p.restore();
-  // warpedImage updaten
   const newC=document.createElement('canvas'); newC.width=800; newC.height=800; newC.getContext('2d').drawImage(warpPreview,0,0);
   warpedImage=newC; syncOverlaySize(); clearOverlay(); drawGrid();
   updateStatus('Ausrichtung gesetzt: Weiß unten rechts.');
 }
 
-/* ===== Preprocess für Erkennung ===== */
+/* ===== Preprocess & Erkennung ===== */
 function preprocessForDetection(){ let src=cv.imread(warpedImage); let out=new cv.Mat(); src.convertTo(out,-1,1+(Number(rngContrast.value)||0)/50,(Number(rngBright.value)||0)*2.5); cv.cvtColor(out,out,cv.COLOR_RGBA2GRAY); src.delete(); return out; }
-
-/* ===== Simple Erkennung (Besetzung+Farbe) ===== */
 function detectBoard(){
   if(!warpedImage){ updateStatus('Kein entzerrtes Bild.', true); return; }
   let gray=preprocessForDetection(), lap=new cv.Mat(); cv.Laplacian(gray,lap,cv.CV_16S,3,1,0,cv.BORDER_DEFAULT); let absLap=new cv.Mat(); cv.convertScaleAbs(lap,absLap);
@@ -547,7 +556,6 @@ function boardToFEN(bd){ const rows=[]; for(let r=0;r<8;r++){ let line='', empty
 function updateFEN(){ fenOut.value=boardToFEN(board); }
 
 /* ===== Buttons ===== */
-function drawGridAndImage(){ drawGrid(); }
 btnStart.addEventListener('click', ()=> startStream(cameraSelect.value||undefined));
 cameraSelect.addEventListener('change', ()=> startStream(cameraSelect.value));
 btnResetCorners.addEventListener('click', ()=>{ if(latestImage){ ctxPhoto.drawImage(latestImage,0,0); placeDefaultHandles(); } });
